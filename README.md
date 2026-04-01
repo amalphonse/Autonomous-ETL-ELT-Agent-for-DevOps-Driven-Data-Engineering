@@ -250,7 +250,207 @@ All executions are persisted for audit trailing and historical analysis. Use `/p
 - **Credentials:** Never commit `.env` — use `.gitignore` to protect secrets
 - **API Keys:** Store in environment variables, rotate exposed keys immediately  
 - **Code Execution:** ExecutionAgent runs PySpark code in isolated environment with timeout (5 min) and error recovery
-- **Database:** SQLite local storage; recommended to migrate to encrypted PostgreSQL for production
+- **Database:** SQLite for development; PostgreSQL recommended for production with encryption
+
+## 🚀 Deployment & Production Readiness
+
+### Docker Setup
+
+The project includes containerized deployment with:
+- **Multi-stage Dockerfile** — Optimized image with Python 3.12 and Java 17 for Spark
+- **Docker Compose** — PostgreSQL + API service orchestration
+- **Environment overrides** — Different configs for dev/staging/production
+
+### Local Docker Development
+
+1. **Build and run with PostgreSQL:**
+```bash
+docker-compose up --build
+```
+
+2. **Development mode (with hot-reload):**
+```bash
+# Auto-applies docker-compose.override.yml
+docker-compose up --build
+# Edit src/ files and see changes instantly
+```
+
+3. **Access services:**
+- API: `http://localhost:8000`
+- Health: `http://localhost:8000/health`
+- PostgreSQL: `localhost:5432` (from host) or `postgres:5432` (from containers)
+- Logs: `./logs/` directory
+
+4. **Stop and cleanup:**
+```bash
+docker-compose down
+docker-compose down -v  # Also remove data volumes
+```
+
+### Production Deployment
+
+#### Environment Configuration
+
+```bash
+# Set environment variables (use secure secret manager in production)
+export ENVIRONMENT=production
+export LOG_LEVEL=WARNING
+export DB_DRIVER=postgresql
+export DB_HOST=prod-postgres.example.com
+export DB_USER=etl_prod_user
+export DB_PASSWORD=<secure-password>
+export OPENAI_API_KEY=<your-key>
+export GITHUB_TOKEN=<your-token>
+```
+
+#### Docker Production Build
+
+```bash
+# Build optimized image
+docker build -t etl-agent:latest .
+docker tag etl-agent:latest etl-agent:1.0.0
+
+# Push to registry
+docker push your-registry/etl-agent:1.0.0
+```
+
+#### Kubernetes Deployment
+
+Create `k8s/deployment.yaml`:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etl-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: etl-api
+  template:
+    metadata:
+      labels:
+        app: etl-api
+    spec:
+      containers:
+      - name: api
+        image: your-registry/etl-agent:1.0.0
+        ports:
+        - containerPort: 8000
+        env:
+        - name: ENVIRONMENT
+          value: production
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: etl-secrets
+              key: database-url
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: etl-secrets
+              key: openai-key
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+```
+
+Deploy with:
+```bash
+kubectl apply -f k8s/deployment.yaml
+kubectl apply -f k8s/service.yaml
+```
+
+#### Cloud Deployment (AWS/GCP/Azure)
+
+##### AWS ECS
+
+```bash
+# Create ECR repository
+aws ecr create-repository --repository-name etl-agent
+
+# Push image
+docker tag etl-agent:latest $AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/etl-agent:latest
+docker push $AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/etl-agent:latest
+
+# Create RDS PostgreSQL instance
+aws rds create-db-instance \
+  --db-instance-identifier etl-agent-db \
+  --engine postgres \
+  --db-instance-class db.t3.micro
+```
+
+##### Google Cloud Run
+
+```bash
+# Build and push to Artifact Registry
+gcloud builds submit --tag us-central1-docker.pkg.dev/$PROJECT/etl-agent/api:latest
+
+# Deploy to Cloud Run
+gcloud run deploy etl-api \
+  --image us-central1-docker.pkg.dev/$PROJECT/etl-agent/api:latest \
+  --platform managed \
+  --memory 2Gi \
+  --cpu 2 \
+  --set-env-vars ENVIRONMENT=production,DATABASE_URL=$DB_URL
+```
+
+### Production Checklist
+
+- [ ] Use PostgreSQL database (not SQLite)
+- [ ] Enable encryption at rest and in transit (TLS/HTTPS)
+- [ ] Use AWS Secrets Manager / GCP Secret Manager / Azure Key Vault for credentials
+- [ ] Set `LOG_LEVEL=WARNING` or `ERROR`
+- [ ] Enable application monitoring (CloudWatch, Stackdriver, Application Insights)
+- [ ] Set up log aggregation (CloudWatch Logs, ELK Stack, Datadog)
+- [ ] Configure health checks for load balancers
+- [ ] Enable auto-scaling based on CPU/memory metrics
+- [ ] Set up backup and disaster recovery for database
+- [ ] Enable audit logging for compliance
+- [ ] Use read replicas for high availability
+- [ ] Implement rate limiting for API endpoints
+- [ ] Set up alerting for errors and performance degradation
+- [ ] Document runbooks for common operations
+- [ ] Plan for failover and recovery procedures
+- [ ] Regular security audits and penetration testing
+
+### Monitoring & Logging
+
+The system includes structured logging with:
+- **JSON format** in production for easy parsing by log aggregation tools
+- **Separate error logs** for quick issue identification
+- **Automatic log rotation** every 500MB
+- **Health check endpoint** (`GET /health`) for monitoring systems
+
+Health check response includes:
+- API status
+- Database connectivity
+- Environment information
+- Current database driver (SQLite/PostgreSQL)
+
+### Database Migrations
+
+Using Alembic for schema versioning:
+
+```bash
+# Generate migration after model changes
+alembic revision --autogenerate -m "Add new_field to table"
+
+# Apply migrations
+alembic upgrade head
+
+# Rollback one migration
+alembic downgrade -1
+```
 
 ## 🧪 Testing
 
@@ -262,4 +462,12 @@ pytest -v --cov=src
 Individual test files:
 ```bash
 pytest tests/test_task_agent.py -v
+```
+
+Docker testing:
+```bash
+# Run tests in container
+docker-compose -f docker-compose.yml up api
+# Wait for startup, then in another terminal:
+docker-compose exec api pytest -v
 ```
