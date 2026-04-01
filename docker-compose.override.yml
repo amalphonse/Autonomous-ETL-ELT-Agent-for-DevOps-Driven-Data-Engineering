@@ -1,0 +1,37 @@
+# Docker Compose Override for Development
+# 
+# This file automatically applies to `docker-compose up` in development
+# It overrides settings in docker-compose.yml for a better dev experience
+#
+# For production, remove this file and use docker-compose.yml as-is
+
+version: '3.9'
+
+services:
+  # Development overrides for PostgreSQL
+  postgres:
+    environment:
+      # Log more in development
+      POSTGRES_INITDB_ARGS: "-c log_statement=all -c log_duration=true"
+    ports:
+      - "5432:5432"  # Expose for local debugging
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Development overrides for API
+  api:
+    environment:
+      LOG_LEVEL: DEBUG
+      DB_ECHO: "true"  # Enable SQL query logging
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src  # Hot-reload on file changes
+      - ./logs:/app/logs
+    # Run with reload enabled for development
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             python -m uvicorn src.api:app 
+             --host 0.0.0.0 
+             --port 8000 
+             --reload"

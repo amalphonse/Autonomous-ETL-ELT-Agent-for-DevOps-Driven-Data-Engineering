@@ -1,0 +1,73 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: etl_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-etl_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-etl_password_dev}
+      POSTGRES_DB: ${DB_NAME:-etl_agent_db}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-etl_user} -d ${DB_NAME:-etl_agent_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - etl_network
+
+  # API Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: etl_api
+    environment:
+      # OpenAI & GitHub
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_REPO_URL: ${GITHUB_REPO_URL}
+      
+      # Database
+      DATABASE_URL: postgresql://${DB_USER:-etl_user}:${DB_PASSWORD:-etl_password_dev}@postgres:5432/${DB_NAME:-etl_agent_db}
+      
+      # Environment config
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
+      # API config
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             python -m uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload"
+    networks:
+      - etl_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  etl_network:
+    driver: bridge

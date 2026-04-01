@@ -4,18 +4,20 @@ import asyncio
 import logging
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import uvicorn
 import time
 
+# Initialize structured logging first
+from src.logging_config import logger  # noqa: F401, E402
 from src.config import get_settings
 from src.database import init_db, get_db, PipelineExecution
 from src.database.repository import PipelineExecutionRepository
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Get settings
+settings = get_settings()
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -40,8 +42,23 @@ def get_orchestrator():
 async def startup_event():
     """Initialize database on application startup."""
     logger.info("Starting up application...")
-    init_db()
-    logger.info("Database initialized")
+    logger.info(f"Environment: {settings.environment}")
+    logger.info(f"Log level: {settings.log_level}")
+    logger.info(f"Database driver: {settings.db_driver}")
+    
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Handle application shutdown."""
+    logger.info("Shutting down application...")
+
 
 
 class UserStoryInput(BaseModel):
@@ -109,9 +126,50 @@ class PipelineDetailsResponse(PipelineResponse):
     pull_request: Optional[dict] = None
 
 
+class HealthResponse(BaseModel):
+    """Health check response."""
+    status: str
+    service: str
+    version: str
+    environment: str
+    database: str
+    database_connected: bool
+
+
+@app.get("/health", tags=["Health"], response_model=HealthResponse)
+async def health_check(db: Session = Depends(get_db)):
+    """Comprehensive health check endpoint.
+    
+    Verifies:
+    - Application is running
+    - Database is accessible
+    - Environment configuration is loaded
+    
+    Returns:
+        HealthResponse with health status of all components
+    """
+    try:
+        # Test database connection
+        db.execute("SELECT 1")
+        db_connected = True
+        logger.debug("Database health check passed")
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        db_connected = False
+    
+    return HealthResponse(
+        status="healthy" if db_connected else "degraded",
+        service="Autonomous ETL/ELT Agent",
+        version="1.0.0",
+        environment=settings.environment,
+        database=settings.db_driver,
+        database_connected=db_connected,
+    )
+
+
 @app.get("/", tags=["Health"])
 async def root():
-    """Health check endpoint."""
+    """Root endpoint - redirects to health check."""
     return {
         "status": "healthy",
         "service": "Autonomous ETL/ELT Agent",
