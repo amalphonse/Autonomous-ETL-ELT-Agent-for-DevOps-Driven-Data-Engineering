@@ -3,11 +3,15 @@
 import asyncio
 import logging
 from typing import Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import uvicorn
+import time
 
 from src.config import get_settings
+from src.database import init_db, get_db, PipelineExecution
+from src.database.repository import PipelineExecutionRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +35,13 @@ def get_orchestrator():
         _orchestrator = AgentOrchestrator()
     return _orchestrator
 
-# Store pipeline execution results
-pipeline_results: dict = {}
+# Initialize database on startup
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on application startup."""
+    logger.info("Starting up application...")
+    init_db()
+    logger.info("Database initialized")
 
 
 class UserStoryInput(BaseModel):
@@ -117,7 +126,9 @@ async def root():
     summary="Create an ETL pipeline from user story",
 )
 async def create_pipeline(
-    story: UserStoryInput, background_tasks: BackgroundTasks
+    story: UserStoryInput, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
 ) -> PipelineResponse:
     """Create a production-ready ETL pipeline from a user story.
 
@@ -130,6 +141,7 @@ async def create_pipeline(
     Args:
         story: User story input with ETL requirements.
         background_tasks: FastAPI background task handler.
+        db: Database session dependency.
 
     Returns:
         PipelineResponse with execution status and quality metrics.
@@ -141,8 +153,24 @@ async def create_pipeline(
 
     execution_id = str(uuid.uuid4())
     logger.info(f"Creating pipeline {execution_id} for: {story.title}")
+    
+    start_time = time.time()
 
     try:
+        # Create database record for this execution
+        PipelineExecutionRepository.create(
+            db=db,
+            execution_id=execution_id,
+            user_story_title=story.title,
+            user_story_description=story.description,
+            user_story_json={
+                "title": story.title,
+                "description": story.description,
+                "source_system": story.source_system,
+                "target_system": story.target_system,
+            }
+        )
+
         # Prepare input for orchestrator
         user_story_data = {
             "title": story.title,
@@ -156,18 +184,37 @@ async def create_pipeline(
         # Get orchestrator instance
         orchestrator = get_orchestrator()
 
-        # Run orchestration in background
+        # Run orchestration
         final_state = await orchestrator.execute(user_story_data)
 
-        # Store results
-        pipeline_results[execution_id] = final_state
+        # Calculate duration
+        duration_seconds = time.time() - start_time
 
         # Get summary
         summary = orchestrator.get_summary(final_state)
 
+        # Update database record with results
+        PipelineExecutionRepository.update(
+            db=db,
+            execution_id=execution_id,
+            status=final_state["status"],
+            task_confidence=summary["task_confidence"],
+            code_quality=summary["code_quality"],
+            test_quality=summary["test_quality"],
+            pr_quality=summary["pr_quality"],
+            overall_quality=summary["overall_score"],
+            execution_log=summary["execution_log"],
+            error_message=summary.get("error"),
+            parsed_requirements=final_state.get("parsed_requirements"),
+            generated_code=final_state.get("generated_code"),
+            generated_tests=final_state.get("generated_tests"),
+            pull_request=final_state.get("pull_request"),
+            duration_seconds=duration_seconds,
+        )
+
         # Log execution
         logger.info(
-            f"Pipeline {execution_id} completed with status: {final_state['status']}"
+            f"Pipeline {execution_id} completed with status: {final_state['status']} in {duration_seconds:.2f}s"
         )
 
         return PipelineResponse(
@@ -185,6 +232,18 @@ async def create_pipeline(
 
     except Exception as e:
         logger.error(f"Pipeline creation failed: {str(e)}", exc_info=True)
+        # Update database record with error
+        duration_seconds = time.time() - start_time
+        try:
+            PipelineExecutionRepository.update(
+                db=db,
+                execution_id=execution_id,
+                status="failed",
+                error_message=str(e),
+                duration_seconds=duration_seconds,
+            )
+        except Exception as db_error:
+            logger.error(f"Failed to update execution record: {str(db_error)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -194,11 +253,15 @@ async def create_pipeline(
     tags=["Pipelines"],
     summary="Get pipeline execution details",
 )
-async def get_pipeline(execution_id: str) -> PipelineDetailsResponse:
+async def get_pipeline(
+    execution_id: str,
+    db: Session = Depends(get_db)
+) -> PipelineDetailsResponse:
     """Get detailed results from a pipeline execution.
 
     Args:
         execution_id: The UUID of the pipeline execution.
+        db: Database session dependency.
 
     Returns:
         PipelineDetailsResponse with all generated artifacts.
@@ -206,51 +269,117 @@ async def get_pipeline(execution_id: str) -> PipelineDetailsResponse:
     Raises:
         HTTPException: If execution_id not found.
     """
-    if execution_id not in pipeline_results:
+    execution = PipelineExecutionRepository.get_by_id(db, execution_id)
+    
+    if not execution:
         raise HTTPException(status_code=404, detail="Pipeline execution not found")
 
-    final_state = pipeline_results[execution_id]
-    orchestrator = get_orchestrator()
-    summary = orchestrator.get_summary(final_state)
-
     return PipelineDetailsResponse(
-        execution_id=execution_id,
-        status=final_state["status"],
-        message=f"Pipeline creation {'completed successfully' if final_state['status'] == 'success' else 'failed'}",
-        task_confidence=summary["task_confidence"],
-        code_quality=summary["code_quality"],
-        test_quality=summary["test_quality"],
-        pr_quality=summary["pr_quality"],
-        overall_quality=summary["overall_score"],
-        execution_log=summary["execution_log"],
-        error=summary.get("error"),
-        parsed_requirements=final_state.get("parsed_requirements"),
-        generated_code=final_state.get("generated_code"),
-        generated_tests=final_state.get("generated_tests"),
-        pull_request=final_state.get("pull_request"),
+        execution_id=execution.execution_id,
+        status=execution.status,
+        message=f"Pipeline creation {'completed successfully' if execution.status == 'success' else 'failed'}",
+        task_confidence=execution.task_confidence,
+        code_quality=execution.code_quality,
+        test_quality=execution.test_quality,
+        pr_quality=execution.pr_quality,
+        overall_quality=execution.overall_quality,
+        execution_log=execution.execution_log or [],
+        error=execution.error_message,
+        parsed_requirements=execution.parsed_requirements,
+        generated_code=execution.generated_code,
+        generated_tests=execution.generated_tests,
+        pull_request=execution.pull_request,
     )
 
 
 @app.get("/pipelines", tags=["Pipelines"], summary="List all pipeline executions")
-async def list_pipelines():
-    """Get list of all pipeline executions.
+async def list_pipelines(
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """Get list of all pipeline executions with pagination and filtering.
+
+    Args:
+        limit: Maximum number of results to return.
+        offset: Number of results to skip.
+        status: Filter by status (success/failed/initialized).
+        db: Database session dependency.
 
     Returns:
         List of execution summaries.
     """
-    orchestrator = get_orchestrator()
-    summaries = []
-    for execution_id, state in pipeline_results.items():
-        summary = orchestrator.get_summary(state)
-        summaries.append(
-            {
-                "execution_id": execution_id,
-                "status": state["status"],
-                "story_title": state.get("user_story", {}).get("title", "Unknown"),
-                "overall_quality": summary["overall_score"],
-            }
-        )
-    return {"total": len(summaries), "pipelines": summaries}
+    executions = PipelineExecutionRepository.list_all(
+        db=db,
+        limit=limit,
+        offset=offset,
+        status=status
+    )
+    
+    summaries = [
+        {
+            "execution_id": e.execution_id,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "status": e.status,
+            "user_story_title": e.user_story_title,
+            "overall_quality": e.overall_quality,
+            "duration_seconds": e.duration_seconds,
+        }
+        for e in executions
+    ]
+    
+    return {
+        "total": len(summaries),
+        "limit": limit,
+        "offset": offset,
+        "pipelines": summaries
+    }
+
+
+class ExecutionAnalytics(BaseModel):
+    """Model for execution analytics."""
+    
+    total_executions: int
+    successful: int
+    failed: int
+    success_rate: float
+    average_quality: float
+    average_task_confidence: float
+    average_code_quality: float
+    average_test_quality: float
+    average_pr_quality: float
+
+
+@app.get(
+    "/pipelines/analytics/summary",
+    response_model=ExecutionAnalytics,
+    tags=["Analytics"],
+    summary="Get execution analytics"
+)
+async def get_analytics(db: Session = Depends(get_db)):
+    """Get aggregated analytics about all pipeline executions.
+
+    Returns:
+        ExecutionAnalytics with summary metrics.
+    """
+    analytics = PipelineExecutionRepository.get_analytics(db)
+    return ExecutionAnalytics(**analytics)
+
+
+@app.get(
+    "/pipelines/analytics/by-status",
+    tags=["Analytics"],
+    summary="Get execution counts by status"
+)
+async def get_stats_by_status(db: Session = Depends(get_db)):
+    """Get execution count breakdown by status.
+
+    Returns:
+        Dictionary with status counts.
+    """
+    stats = PipelineExecutionRepository.get_stats_by_status(db)
+    return {"status_counts": stats}
 
 
 if __name__ == "__main__":
