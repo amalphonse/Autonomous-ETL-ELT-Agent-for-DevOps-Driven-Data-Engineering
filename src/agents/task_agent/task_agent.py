@@ -140,7 +140,13 @@ make a reasonable inference based on common data engineering patterns."""
                     "Invalid input format. Expected TaskAgentInput."
                 )
 
-            task_input = TaskAgentInput(**agent_input.dict())
+            # Handle both dict and object inputs
+            if isinstance(agent_input, dict):
+                agent_input_dict = agent_input
+            else:
+                agent_input_dict = agent_input.model_dump()
+            
+            task_input = TaskAgentInput(**agent_input_dict)
 
             logger.info(
                 f"Task Agent processing story: {task_input.user_story.request_id}"

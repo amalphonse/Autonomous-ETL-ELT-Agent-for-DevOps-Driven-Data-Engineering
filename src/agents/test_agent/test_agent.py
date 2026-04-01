@@ -311,6 +311,9 @@ Imports: {', '.join(generated_code.imports[:10])}
     def _extract_json(self, text: str) -> str:
         """Extract JSON from text, handling markdown wrapping.
 
+        Handles both JSON objects {...} and arrays [...], whether directly
+        in the text or wrapped in markdown code blocks.
+
         Args:
             text: Text containing JSON.
 
@@ -324,7 +327,7 @@ Imports: {', '.join(generated_code.imports[:10])}
         except json.JSONDecodeError:
             pass
 
-        # Try to find JSON in text
+        # Try to find JSON object {...}
         start_idx = text.find("{")
         end_idx = text.rfind("}") + 1
 
@@ -336,7 +339,21 @@ Imports: {', '.join(generated_code.imports[:10])}
             except json.JSONDecodeError:
                 pass
 
-        raise ValueError(f"Could not extract valid JSON from response: {text}")
+        # Try to find JSON array [...]
+        start_idx = text.find("[")
+        end_idx = text.rfind("]") + 1
+
+        if start_idx != -1 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx]
+            try:
+                json.loads(json_str)
+                return json_str
+            except json.JSONDecodeError:
+                pass
+
+        # Error message with truncated text for readability
+        error_text = text[:200] + "..." if len(text) > 200 else text
+        raise ValueError(f"Could not extract valid JSON from response: {error_text}")
 
     def _parse_test_response(self, response_data: Dict[str, Any]) -> GeneratedTests:
         """Parse LLM response into GeneratedTests object.
@@ -347,10 +364,21 @@ Imports: {', '.join(generated_code.imports[:10])}
         Returns:
             GeneratedTests object with validated data.
         """
+        # Normalize test types - LLM may return invalid types like 'parametrized'
+        valid_test_types = {"unit", "integration", "validation", "performance"}
+        test_cases_data = response_data.get("test_cases", [])
+
+        for case in test_cases_data:
+            if "test_type" in case:
+                test_type = case["test_type"].lower()
+                if test_type not in valid_test_types:
+                    logger.warning(
+                        f"Invalid test type '{case['test_type']}' normalized to 'unit'"
+                    )
+                    case["test_type"] = "unit"
+
         # Parse test cases
-        test_cases = [
-            TestCase(**case) for case in response_data.get("test_cases", [])
-        ]
+        test_cases = [TestCase(**case) for case in test_cases_data]
 
         # Parse validation suites
         validation_suites = [

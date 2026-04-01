@@ -6,6 +6,7 @@ all agents in the autonomous ETL/ELT pipeline.
 
 from typing import TypedDict, Optional, Any
 import logging
+import uuid
 
 from src.agents.task_agent import TaskAgent, UserStory, ParsedRequirements
 from src.agents.coding_agent import CodingAgent, GeneratedCode
@@ -66,13 +67,40 @@ class AgentOrchestrator:
         """Execute the complete orchestration pipeline.
 
         Args:
-            user_story_data: User story input data.
+            user_story_data: User story input data with title, description, etc.
 
         Returns:
             Final state with all agent outputs.
         """
+        # Transform API input into proper UserStory format
+        request_id = str(uuid.uuid4())
+        
+        # Combine title and description into story text
+        story_text = f"{user_story_data.get('title', 'Untitled')}\n\n{user_story_data.get('description', '')}"
+        
+        # Wrap additional fields in attachments
+        attachments = {}
+        if user_story_data.get("source_system"):
+            attachments["source_system"] = user_story_data["source_system"]
+        if user_story_data.get("target_system"):
+            attachments["target_system"] = user_story_data["target_system"]
+        if user_story_data.get("data_quality_rules"):
+            attachments["data_quality_rules"] = user_story_data["data_quality_rules"]
+        if user_story_data.get("performance_requirements"):
+            attachments["performance_requirements"] = user_story_data["performance_requirements"]
+        
+        # Create proper UserStory dict
+        user_story_dict = {
+            "user_id": "api-user",
+            "request_id": request_id,
+            "story": story_text,
+            "format": "text",
+            "attachments": attachments if attachments else None,
+            "metadata": {}
+        }
+        
         initial_state: OrchestrationState = {
-            "user_story": user_story_data,
+            "user_story": user_story_dict,
             "status": "started",
             "execution_log": [],
         }
