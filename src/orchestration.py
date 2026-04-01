@@ -12,6 +12,7 @@ from src.agents.task_agent import TaskAgent, UserStory, ParsedRequirements
 from src.agents.coding_agent import CodingAgent, GeneratedCode
 from src.agents.test_agent import TestAgent, GeneratedTests
 from src.agents.pr_agent import PRAgent, GeneratedPullRequest
+from src.execution import ExecutionAgent
 from src.types import AgentStatus
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,11 @@ class OrchestrationState(TypedDict):
     test_quality_score: float = 0.0
     coverage_metrics: Optional[dict] = None
 
+    # Execution Agent output (NEW)
+    execution_result: Optional[dict] = None
+    execution_quality_score: float = 0.0
+    execution_status: str = "not_executed"
+
     # PR Agent output
     pull_request: Optional[dict] = None
     pr_quality_score: float = 0.0
@@ -53,7 +59,8 @@ class AgentOrchestrator:
     1. Task Agent - Parse requirements
     2. Coding Agent - Generate code
     3. Test Agent - Create tests
-    4. PR Agent - Prepare Pull Request
+    4. Execution Agent - Run generated code
+    5. PR Agent - Prepare Pull Request
     """
 
     def __init__(self):
@@ -61,6 +68,7 @@ class AgentOrchestrator:
         self.task_agent = TaskAgent()
         self.coding_agent = CodingAgent()
         self.test_agent = TestAgent()
+        self.execution_agent = ExecutionAgent(use_local_executor=True)
         self.pr_agent = PRAgent()
 
     async def execute(self, user_story_data: dict) -> OrchestrationState:
@@ -122,6 +130,12 @@ class AgentOrchestrator:
 
             # Execute Test Agent
             initial_state = await self._run_test_agent(initial_state)
+            if initial_state.get("error"):
+                initial_state["status"] = "failed"
+                return initial_state
+
+            # Execute Code (run generated PySpark code)
+            initial_state = await self._run_execution_agent(initial_state)
             if initial_state.get("error"):
                 initial_state["status"] = "failed"
                 return initial_state
@@ -262,6 +276,64 @@ class AgentOrchestrator:
 
         return state
 
+    async def _run_execution_agent(self, state: OrchestrationState) -> OrchestrationState:
+        """Run Execution Agent - Execute generated code.
+
+        Args:
+            state: Current orchestration state.
+
+        Returns:
+            Updated state with Execution output.
+        """
+        logger.info("Executing Code")
+
+        if not state.get("generated_code"):
+            state["error"] = "Generated code missing"
+            return state
+
+        try:
+            # Prepare input for Execution Agent
+            execution_input = {
+                "generated_code": state["generated_code"],
+            }
+
+            # Execute Execution Agent
+            output = await self.execution_agent.execute(execution_input)
+
+            if output.status == AgentStatus.SUCCESS:
+                state["execution_result"] = output.data.get("execution_result")
+                state["execution_quality_score"] = output.data.get(
+                    "quality_score", 0.5
+                )
+                state["execution_status"] = output.data.get("execution_status", "unknown")
+                state["execution_log"].append(
+                    "✅ Execution Agent: Code executed successfully"
+                )
+                logger.info(
+                    f"Execution Agent status: {state['execution_status']} "
+                    f"(quality: {state['execution_quality_score']:.2%})"
+                )
+            else:
+                # Log execution error but don't fail the pipeline
+                error_msg = output.data.get("error", "Unknown execution error")
+                logger.warning(f"Execution Agent warning: {error_msg}")
+                state["execution_status"] = "failed"
+                state["execution_quality_score"] = 0.0
+                state["execution_result"] = output.data
+                state["execution_log"].append(
+                    "⚠️ Execution Agent: Code execution failed (continuing pipeline)"
+                )
+
+        except Exception as e:
+            logger.error(f"Execution Agent error: {str(e)}")
+            state["execution_status"] = "error"
+            state["execution_quality_score"] = 0.0
+            state["execution_log"].append(
+                "⚠️ Execution Agent: Execution error (continuing pipeline)"
+            )
+
+        return state
+
     async def _run_pr_agent(self, state: OrchestrationState) -> OrchestrationState:
         """Run PR Agent - Create Pull Request.
 
@@ -341,18 +413,30 @@ class AgentOrchestrator:
         Returns:
             Summary dictionary with key metrics.
         """
+        # Calculate overall quality - average of all agent quality scores
+        code_quality = state.get("code_quality_score", 0.0)
+        test_quality = state.get("test_quality_score", 0.0)
+        pr_quality = state.get("pr_quality_score", 0.0)
+        execution_quality = state.get("execution_quality_score", 0.5)  # Default 0.5 if not executed
+        
+        # Average quality across all agents (5 agents: task, coding, test, execution, pr)
+        overall_score = (
+            state.get("task_confidence", 0.0)
+            + code_quality
+            + test_quality
+            + execution_quality
+            + pr_quality
+        ) / 5
+        
         return {
             "status": state["status"],
             "task_confidence": state.get("task_confidence", 0.0),
-            "code_quality": state.get("code_quality_score", 0.0),
-            "test_quality": state.get("test_quality_score", 0.0),
-            "pr_quality": state.get("pr_quality_score", 0.0),
-            "overall_score": (
-                (state.get("code_quality_score", 0.0)
-                 + state.get("test_quality_score", 0.0)
-                 + state.get("pr_quality_score", 0.0))
-                / 3
-            ),
+            "code_quality": code_quality,
+            "test_quality": test_quality,
+            "execution_quality": execution_quality,
+            "execution_status": state.get("execution_status", "not_executed"),
+            "pr_quality": pr_quality,
+            "overall_score": overall_score,
             "execution_log": state.get("execution_log", []),
             "error": state.get("error"),
         }
