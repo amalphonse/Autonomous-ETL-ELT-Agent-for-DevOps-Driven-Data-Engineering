@@ -440,6 +440,196 @@ async def get_stats_by_status(db: Session = Depends(get_db)):
     return {"status_counts": stats}
 
 
+# ============================================================================
+# Lineage Endpoints
+# ============================================================================
+
+@app.get(
+    "/pipelines/{execution_id}/lineage",
+    tags=["Lineage"],
+    summary="Get data lineage for pipeline execution"
+)
+async def get_pipeline_lineage(execution_id: str, db: Session = Depends(get_db)):
+    """Get data lineage information for a pipeline execution.
+    
+    Includes:
+    - Source datasets and their locations
+    - Target datasets and their locations
+    - Transformations applied (filters, joins, aggregates, etc.)
+    - Data flow graph
+    
+    Args:
+        execution_id: Execution ID of the pipeline
+        db: Database session
+        
+    Returns:
+        Lineage information including datasets, transformations, and data flow
+    """
+    execution = PipelineExecutionRepository.get_by_id(db, execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    # Extract lineage from stored execution data
+    lineage_data = execution.execution_result.get("lineage", {}) if isinstance(execution.execution_result, dict) else {}
+    
+    if not lineage_data:
+        logger.warning(f"No lineage data found for execution {execution_id}")
+        return {
+            "execution_id": execution_id,
+            "message": "No lineage data available for this execution",
+            "datasets": {},
+            "transformations": [],
+            "sources": [],
+            "targets": [],
+        }
+    
+    logger.info(f"Retrieved lineage for execution {execution_id}")
+    return lineage_data
+
+
+@app.get(
+    "/lineage/datasets",
+    tags=["Lineage"],
+    summary="Get all datasets across executions"
+)
+async def get_all_datasets(db: Session = Depends(get_db)):
+    """Get all datasets that have been referenced across pipeline executions.
+    
+    Returns:
+        List of unique datasets with their properties and usage frequency
+    """
+    executions = PipelineExecutionRepository.get_all(db)
+    
+    datasets_map = {}
+    for execution in executions:
+        lineage = execution.execution_result.get("lineage", {}) if isinstance(execution.execution_result, dict) else {}
+        for dataset_name, dataset_info in lineage.get("datasets", {}).items():
+            if dataset_name not in datasets_map:
+                datasets_map[dataset_name] = {
+                    **dataset_info,
+                    "usage_count": 0,
+                    "executions": [],
+                }
+            datasets_map[dataset_name]["usage_count"] += 1
+            datasets_map[dataset_name]["executions"].append(execution.execution_id)
+    
+    logger.info(f"Retrieved {len(datasets_map)} unique datasets")
+    return {
+        "total_datasets": len(datasets_map),
+        "datasets": list(datasets_map.values()),
+    }
+
+
+@app.get(
+    "/lineage/transformations",
+    tags=["Lineage"],
+    summary="Get all transformations across executions"
+)
+async def get_all_transformations(db: Session = Depends(get_db)):
+    """Get all transformations applied across pipeline executions.
+    
+    Returns:
+        List of unique transformations with their frequency and details
+    """
+    executions = PipelineExecutionRepository.get_all(db)
+    
+    transformations_list = []
+    transformation_counts = {}
+    
+    for execution in executions:
+        lineage = execution.execution_result.get("lineage", {}) if isinstance(execution.execution_result, dict) else {}
+        for trans in lineage.get("transformations", []):
+            operation = trans.get("operation", "unknown")
+            if operation not in transformation_counts:
+                transformation_counts[operation] = 0
+            transformation_counts[operation] += 1
+            
+            # Add unique transformations
+            trans_key = f"{trans.get('name')}_{trans.get('operation')}"
+            if not any(t.get("name") == trans.get("name") for t in transformations_list):
+                transformations_list.append({
+                    **trans,
+                    "execution_id": execution.execution_id,
+                })
+    
+    logger.info(f"Retrieved {len(transformations_list)} unique transformations")
+    return {
+        "total_transformations": len(transformations_list),
+        "transformation_types": transformation_counts,
+        "transformations": transformations_list,
+    }
+
+
+@app.get(
+    "/lineage/graph/{execution_id}",
+    tags=["Lineage"],
+    summary="Get data lineage as graph representation"
+)
+async def get_lineage_graph(execution_id: str, db: Session = Depends(get_db)):
+    """Get data lineage as a directed acyclic graph (DAG).
+    
+    Useful for visualization in tools like Cytoscape, Plotly, or custom dashboards.
+    
+    Args:
+        execution_id: Execution ID
+        
+    Returns:
+        Graph with nodes (datasets/transformations) and edges (connections)
+    """
+    execution = PipelineExecutionRepository.get_by_id(db, execution_id)
+    if not execution:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    lineage = execution.execution_result.get("lineage", {}) if isinstance(execution.execution_result, dict) else {}
+    
+    # Build graph nodes
+    nodes = []
+    edges = []
+    
+    # Add dataset nodes
+    for dataset_name, dataset_info in lineage.get("datasets", {}).items():
+        nodes.append({
+            "id": dataset_name,
+            "label": dataset_name,
+            "type": "dataset",
+            "namespace": dataset_info.get("namespace"),
+            "location": dataset_info.get("location"),
+        })
+    
+    # Add transformation nodes and edges
+    for trans in lineage.get("transformations", []):
+        trans_id = trans.get("name")
+        nodes.append({
+            "id": trans_id,
+            "label": trans.get("operation", "transform"),
+            "type": "transformation",
+            "operation": trans.get("operation"),
+        })
+        
+        # Add edges from inputs to transformation
+        for input_ds in trans.get("inputs", []):
+            edges.append({
+                "source": input_ds,
+                "target": trans_id,
+            })
+        
+        # Add edges from transformation to outputs
+        for output_ds in trans.get("outputs", []):
+            edges.append({
+                "source": trans_id,
+                "target": output_ds,
+            })
+    
+    logger.info(f"Generated lineage graph for {execution_id} with {len(nodes)} nodes and {len(edges)} edges")
+    return {
+        "execution_id": execution_id,
+        "graph": {
+            "nodes": nodes,
+            "edges": edges,
+        },
+    }
+
+
 if __name__ == "__main__":
     settings = get_settings()
     uvicorn.run(

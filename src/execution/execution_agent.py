@@ -1,12 +1,15 @@
 """Execution Agent for running generated PySpark code."""
 
 import logging
+import uuid
 from typing import Optional, Dict, Any
 
 from src.config import get_settings
 from src.types import Agent, AgentType, AgentStatus, AgentInput, AgentOutput
 from src.agents.coding_agent.schemas import GeneratedCode
 from src.execution.spark_executor import LocalSparkExecutor
+from src.lineage.extractor import LineageExtractor
+from src.lineage.emitter import LineageEmitter
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,7 @@ class ExecutionAgentOutput:
         stderr: str,
         execution_result: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
+        lineage: Optional[Dict[str, Any]] = None,
     ):
         self.execution_status = execution_status
         self.duration_seconds = duration_seconds
@@ -36,6 +40,7 @@ class ExecutionAgentOutput:
         self.stderr = stderr
         self.execution_result = execution_result
         self.error_message = error_message
+        self.lineage = lineage or {}
 
     def model_dump(self):
         """Convert to dictionary."""
@@ -46,6 +51,7 @@ class ExecutionAgentOutput:
             "stderr": self.stderr,
             "execution_result": self.execution_result,
             "error_message": self.error_message,
+            "lineage": self.lineage,
         }
 
 
@@ -79,14 +85,17 @@ class ExecutionAgent(Agent):
         )
 
     async def execute(self, agent_input: AgentInput) -> AgentOutput:
-        """Execute the generated code.
+        """Execute the generated code and extract lineage.
 
         Args:
             agent_input: Should contain generated_code.
 
         Returns:
-            AgentOutput with execution results.
+            AgentOutput with execution results and lineage information.
         """
+        execution_id = str(uuid.uuid4())
+        lineage_data = {}
+        
         try:
             # Parse input
             if isinstance(agent_input, dict):
@@ -108,7 +117,24 @@ class ExecutionAgent(Agent):
             if not code_to_execute:
                 return self._error_output("No code to execute found in generated_code")
 
-            logger.info("Starting code execution...")
+            logger.info("Starting code execution with lineage tracking...")
+            
+            # Extract lineage from code before execution
+            lineage_extractor = LineageExtractor(
+                execution_id=execution_id,
+                pipeline_name="etl_pipeline"
+            )
+            pipeline_lineage = lineage_extractor.extract(code_to_execute)
+            lineage_data = pipeline_lineage.to_dict()
+            
+            logger.info(f"Extracted lineage: {len(pipeline_lineage.sources)} sources, {len(pipeline_lineage.targets)} targets")
+            
+            # Emit START event
+            lineage_emitter = LineageEmitter(execution_id=execution_id, backend="local")
+            lineage_emitter.emit_start(
+                pipeline_name="etl_pipeline",
+                inputs=pipeline_lineage.sources
+            )
 
             # Execute the code
             execution_result = self.executor.execute_code(
@@ -121,8 +147,19 @@ class ExecutionAgent(Agent):
                 f"Execution completed with status: {execution_result['status']} "
                 f"in {execution_result['duration_seconds']:.2f}s"
             )
+            
+            # Emit COMPLETE event with results
+            lineage_emitter.emit_complete(
+                pipeline_name="etl_pipeline",
+                inputs=pipeline_lineage.sources,
+                outputs=pipeline_lineage.targets,
+                status=execution_result['status'],
+            )
+            
+            # Emit full lineage
+            lineage_emitter.emit_lineage(pipeline_lineage)
 
-            # Create output
+            # Create output with lineage information
             execution_output = ExecutionAgentOutput(
                 execution_status=execution_result["status"],
                 duration_seconds=execution_result["duration_seconds"],
@@ -130,6 +167,7 @@ class ExecutionAgent(Agent):
                 stderr=execution_result["stderr"],
                 execution_result=execution_result.get("execution_result"),
                 error_message=execution_result.get("error"),
+                lineage=lineage_data,
             )
 
             # Calculate quality score based on execution success
