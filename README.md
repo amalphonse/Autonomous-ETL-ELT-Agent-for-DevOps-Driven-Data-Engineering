@@ -11,9 +11,10 @@ This system minimizes manual effort in the DE lifecycle by using **Agentic AI** 
 * **Automated Spark Generation:** Produces modular PySpark code using Delta Lake patterns.
 * **Autonomous Validation:** Auto-generates and runs `pytest` suites including null-checks and schema assertions.
 * **Code Execution:** Safely executes generated PySpark code with error recovery and metrics capture.
+* **Data Lineage Tracking:** Extracts and visualizes data flows with OpenLineage protocol compliance for full data governance.
 * **Persistent Storage:** SQLite database tracks all executions with full audit trail and analytics.
 * **Git Automation:** Creates branches, commits code, and raises Pull Requests via GitHub API.
-* **REST API:** FastAPI endpoints for pipeline creation, querying, and analytics.
+* **REST API:** FastAPI endpoints for pipeline creation, querying, analytics, and lineage visualization.
 
 ## 🏗 Architecture
 
@@ -145,6 +146,7 @@ graph TB
 │   ├── agents/               # Task, Coding, Test, Execution, PR agents
 │   ├── database/             # SQLAlchemy models, repository pattern, initialization
 │   ├── execution/            # SparkExecutor, LocalExecutor, ExecutionAgent
+│   ├── lineage/              # Data lineage extraction and OpenLineage event emission
 │   ├── orchestration.py      # Multi-agent orchestration and state management
 │   ├── api.py                # FastAPI endpoints and REST interface
 │   ├── config.py             # Configuration and environment variables
@@ -230,6 +232,26 @@ Server runs at `http://localhost:8000`
 - Statistics grouped by execution status
 - Response: `{status: count, ...}`
 
+### Data Lineage (NEW)
+**GET** `/pipelines/{execution_id}/lineage`
+- Retrieves extracted lineage data for a specific pipeline execution
+- Response: `{sources: [...], targets: [...], transformations: [...]}`
+- Includes OpenLineage-compliant event data for visualization tools
+
+**GET** `/lineage/datasets`
+- Discovers all datasets across all pipeline executions
+- Query params: `limit`, `offset`
+- Response: List of all source and target datasets with location and format information
+
+**GET** `/lineage/transformations`
+- Discovers all transformation operations across executions
+- Response: List of all operations (filter, join, aggregate, select, union) with input/output mapping
+
+**GET** `/lineage/graph/{execution_id}`
+- Returns DAG (Directed Acyclic Graph) representation of data lineage
+- Response: `{nodes: [...], edges: [...]}` suitable for visualization tools
+- Nodes represent datasets/transformations; edges represent data flow
+
 ### Health Check
 **GET** `/health`
 - System health status
@@ -245,7 +267,71 @@ The SQLite database (`etl_agent.db`) stores:
 
 All executions are persisted for audit trailing and historical analysis. Use `/pipelines` endpoints to query the database.
 
-## 🔒 Security
+## � Data Lineage & Governance
+
+The system includes comprehensive data lineage tracking for full observability of data transformations according to OpenLineage standards.
+
+### Lineage Extraction
+
+The **LineageExtractor** automatically analyzes generated PySpark code to identify:
+- **Source Datasets:** All `spark.read.*` operations (CSV, Parquet, JSON, ORC, Delta)
+- **Target Datasets:** All `df.write.save()` operations with format inference
+- **Transformations:** Automatically detected operations including:
+  - **Filter:** `df.filter()` with condition extraction
+  - **Select:** `df.select()` with column mapping
+  - **Join:** `df.join()` with join keys and input tracking
+  - **Aggregate:** `df.groupBy().agg()` operations
+  - **Union:** `df.union()` combining multiple sources
+
+### Lineage Events
+
+The **LineageEmitter** generates OpenLineage-compliant events:
+- **START Event:** Emitted when execution begins with input dataset information
+- **COMPLETE Event:** Emitted when execution finishes with status and output datasets
+- **Lineage Data:** Full transformation graph with source→target mappings for visualization
+
+### Visualization & Discovery
+
+**Lineage Query Endpoints:**
+- Retrieve lineage for specific executions via `/pipelines/{id}/lineage`
+- Discover all datasets across executions via `/lineage/datasets`
+- Identify transformation patterns via `/lineage/transformations`
+- Export DAG structure for visualization via `/lineage/graph/{id}`
+
+**Integration Points:**
+- OpenLineage-compliant events can be sent to external tools (Maroochy, OpenDataDiscovery, etc.)
+- DAG endpoints provide `nodes` and `edges` suitable for graph visualization libraries
+- SQL queries on database can reconstruct complete lineage history
+
+### Example: Tracking a Pipeline
+
+For a pipeline that reads customers and orders, joins them, and aggregates:
+
+```python
+# Code execution
+df_customers = spark.read.parquet("s3://data/customers.parquet")
+df_orders = spark.read.parquet("s3://data/orders.parquet")
+df_joined = df_customers.join(df_orders, on="customer_id")
+df_summary = df_joined.groupBy("customer_id").agg(count("*"))
+df_summary.write.format("parquet").save("s3://output/customer_summary.parquet")
+```
+
+**Lineage Extracted:**
+- **Sources:** customers, orders
+- **Targets:** customer_summary
+- **Transformations:** join (2 inputs), aggregate (1 input)
+- **OpenLineage DAG:** Nodes=[customers, orders, joined, summary], Edges=[customers→joined, orders→joined, joined→summary]
+
+### Data Governance Benefits
+
+- **Compliance:** Track data lineage for regulatory requirements (GDPR, CCPA, SOX)
+- **Impact Analysis:** Identify downstream pipelines affected by upstream data changes
+- **Quality Monitoring:** Correlate data quality issues with transformation steps
+- **Access Control:** Understand data flow for security and access policies
+- **Documentation:** Automatically generated lineage serves as pipeline documentation
+- **Troubleshooting:** Trace issues back to source datasets and transformations
+
+## �🔒 Security
 
 - **Credentials:** Never commit `.env` — use `.gitignore` to protect secrets
 - **API Keys:** Store in environment variables, rotate exposed keys immediately  
