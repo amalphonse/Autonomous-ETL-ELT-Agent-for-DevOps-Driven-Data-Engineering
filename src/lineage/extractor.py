@@ -107,15 +107,28 @@ class LineageExtractor:
     
     def _extract_writes(self, code: str) -> None:
         """Extract target datasets from write operations."""
-        # Pattern for write operations
-        write_pattern = r"(\w+)\.write\.(?:mode\s*\(\s*['\"]([^'\"]+)['\"])?\s*\.(?:format\s*\(\s*['\"]([^'\"]+)['\"])?\s*\.save\s*\(\s*['\"]([^'\"]+)['\"]"
-        matches = re.finditer(write_pattern, code, re.IGNORECASE)
+        # Pattern for write operations with flexible order and optional format/mode
+        # Matches: df.write.format(...).save(...) or df.write.mode(...).format(...).save(...), etc.
+        write_pattern = r"(\w+)\.write.*?\.save\s*\(\s*['\"]([^'\"]+)['\"]"
+        matches = re.finditer(write_pattern, code, re.IGNORECASE | re.DOTALL)
         
         for match in matches:
             df_name = match.group(1)
-            save_mode = match.group(2) or "overwrite"
-            format_type = match.group(3) or "parquet"
-            path = match.group(4)
+            path = match.group(2)
+            
+            # Try to infer format from path or from format() call
+            format_type = "parquet"
+            if ".csv" in path.lower():
+                format_type = "csv"
+            elif ".json" in path.lower():
+                format_type = "json"
+            elif ".orc" in path.lower():
+                format_type = "orc"
+            else:
+                # Look for format() call in the write chain
+                format_match = re.search(r'\.format\s*\(\s*["\']([^"\']+)["\']', code[match.start():match.end()])
+                if format_match:
+                    format_type = format_match.group(1)
             
             dataset_name = self._extract_name_from_path(path)
             

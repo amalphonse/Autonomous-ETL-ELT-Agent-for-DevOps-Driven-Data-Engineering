@@ -498,7 +498,7 @@ async def get_all_datasets(db: Session = Depends(get_db)):
     Returns:
         List of unique datasets with their properties and usage frequency
     """
-    executions = PipelineExecutionRepository.get_all(db)
+    executions = PipelineExecutionRepository.list_all(db)
     
     datasets_map = {}
     for execution in executions:
@@ -531,7 +531,7 @@ async def get_all_transformations(db: Session = Depends(get_db)):
     Returns:
         List of unique transformations with their frequency and details
     """
-    executions = PipelineExecutionRepository.get_all(db)
+    executions = PipelineExecutionRepository.list_all(db)
     
     transformations_list = []
     transformation_counts = {}

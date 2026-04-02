@@ -42,6 +42,9 @@ class PipelineExecution(Base):
     generated_tests = Column(JSON, nullable=True)
     pull_request = Column(JSON, nullable=True)
 
+    # Execution result and lineage
+    execution_result = Column(JSON, nullable=True)  # Includes execution logs, lineage, and detailed results
+
     # Execution metadata
     execution_log = Column(JSON, default=list)  # List of log entries
     duration_seconds = Column(Float, nullable=True)

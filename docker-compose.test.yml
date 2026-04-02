@@ -1,0 +1,23 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: etl_postgres_test
+    environment:
+      POSTGRES_USER: etl_user
+      POSTGRES_PASSWORD: etl_password_dev
+      POSTGRES_DB: etl_agent_db
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U etl_user -d etl_agent_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data_test:
+    driver: local
