@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Application Configuration
     app_host: str = "0.0.0.0"
     app_port: int = 8000
+    api_key: Optional[str] = None  # Optional API key for authentication
 
     # Database Configuration
     database_url: Optional[str] = None  # Override with explicit URL if set

@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi.security import HTTPBearer, HTTPAuthCredentials
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -19,7 +20,34 @@ from src.database.repository import PipelineExecutionRepository
 # Get settings
 settings = get_settings()
 
-# Initialize FastAPI app
+# Initialize security
+security = HTTPBearer()
+
+def verify_api_token(credentials: HTTPAuthCredentials = Depends(security)) -> str:
+    """Verify API token from Authorization header.
+    
+    Args:
+        credentials: HTTP Bearer credentials from request
+        
+    Returns:
+        The verified token
+        
+    Raises:
+        HTTPException: If token is invalid or missing
+    """
+    token = credentials.credentials
+    valid_tokens = [settings.api_key] if hasattr(settings, 'api_key') and settings.api_key else []
+    
+    # Allow requests without API key if none is configured (development)
+    if not valid_tokens:
+        logger.warning("No API_KEY configured - authentication disabled")
+        return token
+    
+    if token not in valid_tokens:
+        logger.warning(f"Invalid API token attempted: {token[:10]}...")
+        raise HTTPException(status_code=401, detail="Invalid API token")
+    
+    return token
 app = FastAPI(
     title="Autonomous ETL/ELT Agent",
     description="Multi-agent system for generating production-ready ETL pipelines",
@@ -184,7 +212,8 @@ async def root():
 )
 async def create_pipeline_demo(
     story: UserStoryInput,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token: str = Depends(verify_api_token)
 ):
     """Demo endpoint that returns sample generated code without running agents.
     
@@ -325,7 +354,8 @@ def test_schema_validation(spark):
 async def create_pipeline(
     story: UserStoryInput, 
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    token: str = Depends(verify_api_token)
 ) -> PipelineResponse:
     """Create a production-ready ETL pipeline from a user story.
 

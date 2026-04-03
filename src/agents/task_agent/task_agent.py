@@ -53,10 +53,61 @@ class TaskAgent(Agent):
             """You are an expert Data Engineer AI assistant. Your task is to analyze a user story
 and extract detailed ETL/ELT transformation requirements.
 
+## EXAMPLES:
+
+### Example 1: Customer RFM Analysis
+**Input Story:**
+"Load customer transactions from Salesforce, group by customer_id to calculate recency (days since last purchase), 
+frequency (total transactions), and monetary value (total spent). Filter for customers with recency < 30 days and 
+frequency > 5. Write to Snowflake customer_rfm table."
+
+**Expected Output:**
+{
+  "title": "Customer RFM Analysis",
+  "input_sources": [{"name": "salesforce_transactions", "location": "salesforce.public.transactions", 
+    "format": "sql", "schema": [{"name": "transaction_id", "data_type": "string"}, 
+    {"name": "customer_id", "data_type": "string"}, {"name": "amount", "data_type": "float"}, 
+    {"name": "transaction_date", "data_type": "timestamp"}]}],
+  "transformation_steps": [
+    {"step_id": "step-1", "transformation_type": "aggregate", "input_table": "transactions",
+     "group_by": ["customer_id"], 
+     "aggregations": [{"function": "MAX", "column": "transaction_date", "alias": "last_purchase_date"},
+                      {"function": "COUNT", "column": "transaction_id", "alias": "purchase_frequency"},
+                      {"function": "SUM", "column": "amount", "alias": "total_spent"}]},
+    {"step_id": "step-2", "transformation_type": "filter", "input_table": "step-1",
+     "conditions": [{"column": "purchase_frequency", "operator": ">", "value": 5}]}],
+  "data_quality_rules": ["customer_id NOT NULL", "total_spent > 0"],
+  "output_location": "snowflake.analytics.customer_rfm"
+}
+
+### Example 2: Product Orders Aggregation
+**Input Story:**
+"Join orders with product data, filter completed orders from last 12 months, aggregate by product_category
+to get total revenue and order count."
+
+**Expected Output:**
+{
+  "title": "Product Orders Aggregation",
+  "transformation_steps": [
+    {"step_id": "step-1", "transformation_type": "filter", 
+     "conditions": [{"column": "order_status", "operator": "==", "value": "completed"},
+                    {"column": "order_date", "operator": ">", "value": "last 12 months"}]},
+    {"step_id": "step-2", "transformation_type": "join", "left_table": "orders", "right_table": "products",
+     "join_keys": [{"left": "product_id", "right": "product_id"}], "join_type": "inner"},
+    {"step_id": "step-3", "transformation_type": "aggregate", "group_by": ["product_category"],
+     "aggregations": [{"function": "SUM", "column": "order_amount", "alias": "total_revenue"},
+                      {"function": "COUNT", "column": "order_id", "alias": "order_count"}]}
+  ]
+}
+
+---
+
+## ACTUAL USER STORY TO ANALYZE:
+
 User Story:
 {user_story}
 
-Based on the user story, extract and structure the following information:
+Extract and structure the following information:
 1. Input data sources (names, locations, formats, schemas)
 2. Transformation steps (filters, joins, aggregations, windowing, deduplication, etc.)
 3. Output schema and location
