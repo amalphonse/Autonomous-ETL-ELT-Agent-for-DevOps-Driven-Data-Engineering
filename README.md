@@ -510,10 +510,19 @@ kubectl apply -f k8s/deployment.yaml
 kubectl apply -f k8s/service.yaml
 ```
 
-#### Cloud Deployment (AWS/GCP/Azure)
+#### Cloud Deployment Options
 
-##### AWS ECS
+**Quick Reference:**
+- **🚀 [GCP Deployment Guide](DEPLOYMENT_GCP.md)** — Comprehensive guide for Google Cloud Platform
+  - Cloud Run (serverless, lowest ops)
+  - GKE (Kubernetes, production)
+  - Cloud SQL (managed PostgreSQL)
+  - Cloud Build (CI/CD automation)
+  - Monitoring, security, and cost estimation
 
+For detailed step-by-step instructions on deploying to GCP, including Cloud Run quick start, GKE production setup, database configuration, and cost optimization, see [DEPLOYMENT_GCP.md](DEPLOYMENT_GCP.md).
+
+**AWS ECS Quick Start:**
 ```bash
 # Create ECR repository
 aws ecr create-repository --repository-name etl-agent
@@ -527,21 +536,6 @@ aws rds create-db-instance \
   --db-instance-identifier etl-agent-db \
   --engine postgres \
   --db-instance-class db.t3.micro
-```
-
-##### Google Cloud Run
-
-```bash
-# Build and push to Artifact Registry
-gcloud builds submit --tag us-central1-docker.pkg.dev/$PROJECT/etl-agent/api:latest
-
-# Deploy to Cloud Run
-gcloud run deploy etl-api \
-  --image us-central1-docker.pkg.dev/$PROJECT/etl-agent/api:latest \
-  --platform managed \
-  --memory 2Gi \
-  --cpu 2 \
-  --set-env-vars ENVIRONMENT=production,DATABASE_URL=$DB_URL
 ```
 
 ### Production Checklist
