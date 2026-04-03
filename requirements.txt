@@ -9,11 +9,16 @@ uvicorn==0.27.0
 pydantic==2.6.0
 pydantic-settings==2.0.3
 
+# UI & Frontend
+streamlit==1.28.1
+plotly==5.17.0
+requests==2.31.0
+
 # Data Processing
 pyspark==3.5.0
 delta-spark==3.0.0
-pandas==2.1.4
-numpy==1.24.3
+pandas==2.2.0
+numpy==1.26.4
 
 # Text Processing & NLP
 openai==1.14.0
@@ -23,7 +28,7 @@ tiktoken==0.5.2
 sqlalchemy==2.0.25
 alembic==1.13.0
 psycopg2-binary==2.9.9
-google-cloud-bigquery==7.10.0
+# google-cloud-bigquery==3.41.0  # Temporarily disabled due to packaging conflicts
 pyarrow==15.0.0
 
 # Git & DevOps

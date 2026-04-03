@@ -197,21 +197,75 @@ pip install -r requirements.txt
 python -c "from src.database.db import init_db; init_db()"
 ```
 
-5. **Start the API server:**
+5. **Start the API server (Terminal 1):**
 ```bash
 python -m uvicorn src.api:app --reload
 ```
 
 Server runs at `http://localhost:8000`
 
+6. **Launch the Streamlit UI (Terminal 2):**
+```bash
+streamlit run streamlit_app.py
+```
+
+Dashboard opens at `http://localhost:8501`
+
+---
+
+## 🎯 Interactive Dashboard
+
+The **Streamlit UI** provides a user-friendly interface to submit user stories and track pipeline execution:
+
+### Features
+- **📝 Submit User Stories** - Natural language requirements with source/target systems
+- **🤖 View Agent Outputs** - See generated code, tests, and PR details
+- **📊 Pipeline History** - Browse all past executions with filtering
+- **📈 Analytics** - Aggregate metrics, quality scores, success rates
+- **🔗 Data Lineage** - Track data flows and transformations
+
+### Demo Flow
+1. Go to **Tab 1: Submit User Story**
+2. Fill in user story details (title, description, systems, quality rules)
+3. Click **"🚀 Submit Story & Generate Pipeline"**
+4. Watch as 5 agents execute in sequence:
+   - ✏️ Task Agent - Requirements parsing
+   - 🔧 Coding Agent - PySpark code generation
+   - ✅ Test Agent - Unit test creation
+   - ⚡ Execution Agent - Code execution & metrics
+   - 📤 PR Agent - GitHub PR creation
+5. View all agent outputs with syntax highlighting
+6. Check **Tab 2** for execution history, **Tab 3** for analytics, **Tab 4** for lineage
+
+### Example User Story
+```
+Title: Transform Customer Orders to Analytics
+Description: Load customer orders from Salesforce, join with product data, 
+             filter for last 12 months, aggregate by customer to calculate 
+             total orders, revenue, and average order value
+Source: Salesforce CRM
+Target: Snowflake Data Warehouse
+```
+
+See [DEMO_GUIDE.md](DEMO_GUIDE.md) for more detailed examples and instructions.
+
+---
+
 ## 📡 API Endpoints
 
 ### Pipeline Execution
-**POST** `/pipelines/create`
-- Creates and executes a new pipeline from user story
-- Request body: `{"task_description": "user story text", "data_schema": {...}}`
-- Response: Full execution result with 5-agent outputs and metrics
-- Status: 201 Created
+
+**POST** `/pipelines/demo` (Recommended for testing/demos)
+- Returns mock pipeline execution with sample outputs instantly
+- No OpenAI API calls required
+- Perfect for UI testing and demonstrations
+- Response: Complete execution with generated code, tests, and metrics
+
+**POST** `/pipelines/create` (Production)
+- Creates and executes a new pipeline with full agent orchestration
+- Requires OpenAI API key and GitHub token
+- Uses all 5 agents: Task, Coding, Test, Execution, PR
+- Response: Real generated PySpark code and artifacts
 
 ### Pipeline Queries
 **GET** `/pipelines`

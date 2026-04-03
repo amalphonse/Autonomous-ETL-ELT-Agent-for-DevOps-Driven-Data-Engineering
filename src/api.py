@@ -178,6 +178,145 @@ async def root():
 
 
 @app.post(
+    "/pipelines/demo",
+    tags=["Pipelines"],
+    summary="Demo endpoint - returns mock pipeline execution",
+)
+async def create_pipeline_demo(
+    story: UserStoryInput,
+    db: Session = Depends(get_db)
+):
+    """Demo endpoint that returns sample generated code without running agents.
+    
+    This is for testing the UI without needing OpenAI API calls.
+    """
+    import uuid
+    execution_id = str(uuid.uuid4())
+    
+    logger.info(f"DEMO: Creating mock pipeline {execution_id}")
+    
+    # Return mock data
+    return {
+        "execution_id": execution_id,
+        "status": "success",
+        "message": "Demo pipeline execution completed",
+        "task_confidence": 0.92,
+        "code_quality": 0.88,
+        "test_quality": 0.85,
+        "pr_quality": 0.90,
+        "overall_quality": 89.25,
+        "execution_log": ["Task Agent: Analysis complete", "Coding Agent: Code generated", "Test Agent: Tests created"],
+        "error": None,
+        "task_agent_output": {
+            "status": "success",
+            "parsed_intent": "Load customer orders, join with products, aggregate by customer",
+            "identified_sources": ["Salesforce CRM"],
+            "identified_targets": ["Snowflake"],
+            "transformation_types": ["JOIN", "AGGREGATE", "FILTER"]
+        },
+        "coding_agent_output": {
+            "generated_code": """from pyspark.sql import SparkSession, Window
+from pyspark.sql.functions import col, count, sum as spark_sum, datediff, current_date
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("CustomerOrdersAnalytics").getOrCreate()
+
+# Read source data
+df_customers = spark.read.format("parquet").load("s3://data/customers.parquet")
+df_orders = spark.read.format("parquet").load("s3://data/orders.parquet")
+
+# Filter completed orders from last 12 months
+df_orders_filtered = df_orders.filter(
+    (col("status") == "completed") &
+    (datediff(current_date(), col("order_date")) <= 365)
+)
+
+# Join with product data
+df_products = spark.read.format("parquet").load("s3://data/products.parquet")
+df_joined = (df_orders_filtered
+    .join(df_products, on="product_id")
+    .join(df_customers, on="customer_id")
+)
+
+# Aggregate by customer
+df_summary = df_joined.groupBy("customer_id", "customer_name").agg(
+    count("order_id").alias("total_orders"),
+    spark_sum("order_amount").alias("total_revenue"),
+    (spark_sum("order_amount") / count("order_id")).alias("avg_order_value"),
+    max("order_date").alias("last_order_date")
+)
+
+# Write to target
+df_summary.write.format("parquet").mode("overwrite").save("s3://warehouse/customer_summary")
+print(f"Processed {df_summary.count()} customer records")
+""",
+            "pydantic_models": """from pydantic import BaseModel, Field
+from typing import Optional
+from datetime import datetime
+
+class Customer(BaseModel):
+    customer_id: str = Field(..., description="Unique customer identifier")
+    customer_name: str = Field(..., description="Customer name")
+    total_orders: int = Field(..., description="Total number of completed orders")
+    total_revenue: float = Field(..., description="Total revenue from orders")
+    avg_order_value: float = Field(..., description="Average order value")
+    last_order_date: datetime = Field(..., description="Most recent order date")
+
+class OrderAnalytics(BaseModel):
+    customer_data: list[Customer]
+    execution_timestamp: datetime
+    record_count: int
+"""
+        },
+        "test_agent_output": {
+            "generated_tests": """import pytest
+from pyspark.sql import SparkSession
+
+@pytest.fixture(scope="session")
+def spark():
+    return SparkSession.builder.appName("test").getOrCreate()
+
+def test_no_null_customer_ids(spark):
+    df = spark.read.parquet("s3://warehouse/customer_summary")
+    null_count = df.filter(col("customer_id").isNull()).count()
+    assert null_count == 0, "Customer ID should not have NULL values"
+
+def test_positive_revenue(spark):
+    df = spark.read.parquet("s3://warehouse/customer_summary")
+    invalid = df.filter(col("total_revenue") <= 0).count()
+    assert invalid == 0, "Revenue must be positive"
+
+def test_schema_validation(spark):
+    df = spark.read.parquet("s3://warehouse/customer_summary")
+    assert "customer_id" in df.columns
+    assert "total_revenue" in df.columns
+    assert "avg_order_value" in df.columns
+""",
+            "test_results": {
+                "total_tests": 3,
+                "passed": 3,
+                "failed": 0,
+                "coverage": "85%"
+            }
+        },
+        "execution_agent_output": {
+            "status": "success",
+            "rows_processed": 15234,
+            "execution_duration_seconds": 127.45,
+            "memory_used_mb": 512,
+            "output_records": 1523
+        },
+        "pr_agent_output": {
+            "pr_number": 542,
+            "pr_url": "https://github.com/amalphonse/Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering/pull/542",
+            "branch_name": "feature/customer-analytics-pipeline",
+            "status": "open",
+            "created_at": "2026-04-03T10:15:00Z"
+        }
+    }
+
+
+@app.post(
     "/pipelines/create",
     response_model=PipelineResponse,
     tags=["Pipelines"],
