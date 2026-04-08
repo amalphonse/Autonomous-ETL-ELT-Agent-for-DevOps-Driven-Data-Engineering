@@ -1,9 +1,11 @@
 """Configuration module for the Autonomous ETL/ELT Agent system."""
 
 from pydantic_settings import BaseSettings
+from pydantic import field_validator, Field
 from functools import lru_cache
 from typing import Optional
 import os
+import logging
 
 
 class Settings(BaseSettings):
@@ -14,17 +16,17 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # OpenAI Configuration
-    openai_api_key: str
+    openai_api_key: str = Field(..., description="OpenAI API key")
     openai_model: str = "gpt-4o"
     openai_temperature: float = 0.3
 
     # GitHub Configuration
-    github_token: str
-    github_repo_owner: str
-    github_repo_name: str
+    github_token: str = Field(..., description="GitHub personal access token")
+    github_repo_owner: str = Field(..., description="GitHub repository owner")
+    github_repo_name: str = Field(..., description="GitHub repository name")
 
     # Google Cloud Configuration
-    gcp_project_id: str
+    gcp_project_id: str = Field(..., description="GCP project ID")
     gcp_credentials_path: str = ""
     bq_dataset: str = "etl_automation"
     bq_table_prefix: str = "pipeline_"
@@ -32,7 +34,7 @@ class Settings(BaseSettings):
     # Application Configuration
     app_host: str = "0.0.0.0"
     app_port: int = 8000
-    api_key: Optional[str] = None  # Optional API key for authentication
+    api_key: Optional[str] = Field(None, description="API key for endpoint authentication")
 
     # Database Configuration
     database_url: Optional[str] = None  # Override with explicit URL if set
@@ -51,6 +53,52 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+    # Validation
+    @field_validator('openai_api_key', mode='before')
+    @classmethod
+    def validate_openai_key(cls, v: str) -> str:
+        """Validate OpenAI API key format."""
+        if not v or not isinstance(v, str):
+            raise ValueError('OPENAI_API_KEY is required')
+        if not v.startswith('sk-'):
+            raise ValueError('Invalid OpenAI API key format (must start with sk-)')
+        return v
+
+    @field_validator('github_token', mode='before')
+    @classmethod
+    def validate_github_token(cls, v: str) -> str:
+        """Validate GitHub token format."""
+        if not v or not isinstance(v, str):
+            raise ValueError('GITHUB_TOKEN is required')
+        if not v.startswith(('ghp_', 'github_pat_')):
+            raise ValueError('Invalid GitHub token format')
+        return v
+
+    def validate_production_config(self) -> None:
+        """Validate configuration for production environment.
+        
+        Raises:
+            ValueError: If production requirements are not met
+        """
+        if not self.is_production:
+            return
+            
+        # Require API key in production
+        if not self.api_key:
+            raise ValueError('API_KEY is required in production environment')
+        
+        # Require PostgreSQL in production
+        if self.db_driver == "sqlite":
+            raise ValueError('PostgreSQL required in production (cannot use SQLite)')
+        
+        # Validate environment is set correctly
+        if self.environment != "production":
+            raise ValueError('Environmental inconsistency: environment != production')
+        
+        # Log successful validation
+        logger = logging.getLogger(__name__)
+        logger.info("Production configuration validated successfully")
 
     @property
     def get_database_url(self) -> str:
@@ -92,5 +140,19 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance."""
-    return Settings()
+    """Get cached settings instance with production validation.
+    
+    Raises:
+        ValueError: If production configuration is invalid
+    """
+    settings = Settings()
+    
+    # Validate production configuration on startup
+    try:
+        settings.validate_production_config()
+    except ValueError as e:
+        logger = logging.getLogger(__name__)
+        logger.error(f"Configuration validation failed: {e}")
+        raise
+    
+    return settings

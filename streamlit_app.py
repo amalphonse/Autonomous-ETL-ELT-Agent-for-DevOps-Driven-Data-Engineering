@@ -12,6 +12,7 @@ import time
 from typing import Optional
 import plotly.graph_objects as go
 import plotly.express as px
+import os
 
 # Page configuration
 st.set_page_config(
@@ -56,7 +57,10 @@ st.markdown("""
 
 # Session state initialization
 if "api_url" not in st.session_state:
-    st.session_state.api_url = "http://localhost:8000"
+    # Get API URL from environment variable or use default
+    st.session_state.api_url = os.getenv("API_URL", "http://localhost:8000")
+if "api_key" not in st.session_state:
+    st.session_state.api_key = os.getenv("API_KEY", "")
 if "last_execution" not in st.session_state:
     st.session_state.last_execution = None
 if "polling" not in st.session_state:
@@ -64,26 +68,96 @@ if "polling" not in st.session_state:
 
 # Sidebar configuration
 st.sidebar.title("⚙️ Configuration")
-api_url = st.sidebar.text_input(
-    "API URL",
-    value=st.session_state.api_url,
-    help="FastAPI server endpoint"
-)
-st.session_state.api_url = api_url
+
+# Allow override of API URL in development
+environment = os.getenv("ENVIRONMENT", "development")
+if environment == "development":
+    api_url = st.sidebar.text_input(
+        "API URL",
+        value=st.session_state.api_url,
+        help="FastAPI server endpoint"
+    )
+    st.session_state.api_url = api_url
+    api_key = st.sidebar.text_input(
+        "API Key (optional)",
+        value=st.session_state.api_key,
+        type="password",
+        help="Bearer token for API authentication"
+    )
+    st.session_state.api_key = api_key
+else:
+    # Production: use environment variables only
+    api_url = st.session_state.api_url
+    api_key = st.session_state.api_key
+    st.sidebar.info(f"📍 API: {api_url}")
 
 # Check API health
 def check_api_health():
+    """Check if API is reachable and healthy."""
     try:
-        response = requests.get(f"{api_url}/health", timeout=5)
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        response = requests.get(f"{api_url}/health", timeout=5, headers=headers)
         return response.status_code == 200
-    except:
+    except requests.exceptions.ConnectionError:
         return False
+    except Exception:
+        return False
+
+
+def make_api_request(endpoint: str, method: str = "GET", json_data: dict = None) -> Optional[dict]:
+    """Make authenticated API request.
+    
+    Args:
+        endpoint: API endpoint path (e.g., '/pipelines/demo')
+        method: HTTP method (GET, POST, etc.)
+        json_data: JSON data to send
+        
+    Returns:
+        Response JSON or None if request failed
+    """
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    
+    try:
+        url = f"{api_url}{endpoint}"
+        if method == "POST":
+            response = requests.post(url, json=json_data, headers=headers, timeout=60)
+        elif method == "GET":
+            response = requests.get(url, headers=headers, timeout=10)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+        
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.Timeout:
+        st.error("⏱️ Request timeout. API is taking too long to respond.")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error(f"❌ Cannot reach API at {api_url}. Ensure the server is running.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        error_text = e.response.text[:200] if hasattr(e.response, 'text') else str(e)
+        st.error(f"❌ API Error: {e.response.status_code} - {error_text}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error: {str(e)}")
+        return None
+
 
 if st.sidebar.button("🔗 Check API Connection"):
     if check_api_health():
-        st.sidebar.success("✅ API is running!")
+        st.sidebar.success("✅ API is healthy!")
     else:
-        st.sidebar.error("❌ Cannot reach API. Ensure FastAPI is running on port 8000")
+        st.sidebar.error(f"""❌ Cannot reach API.
+
+Make sure:
+1. FastAPI is running: `uvicorn src.api:app --reload`
+2. API URL is correct: {api_url}
+3. API_KEY is valid (if required)
+""")
 
 st.sidebar.markdown("---")
 

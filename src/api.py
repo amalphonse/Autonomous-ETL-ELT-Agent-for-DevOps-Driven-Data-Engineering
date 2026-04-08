@@ -3,13 +3,16 @@
 import asyncio
 import logging
 from typing import Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthCredentials
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 import uvicorn
 import time
+import os
 
 # Initialize structured logging first
 from src.logging_config import logger  # noqa: F401, E402
@@ -36,14 +39,19 @@ def verify_api_token(credentials: HTTPAuthCredentials = Depends(security)) -> st
         HTTPException: If token is invalid or missing
     """
     token = credentials.credentials
-    valid_tokens = [settings.api_key] if hasattr(settings, 'api_key') and settings.api_key else []
     
-    # Allow requests without API key if none is configured (development)
-    if not valid_tokens:
-        logger.warning("No API_KEY configured - authentication disabled")
+    # In production, API key is REQUIRED
+    if settings.is_production and not settings.api_key:
+        logger.error("Production mode requires API_KEY environment variable")
+        raise HTTPException(status_code=500, detail="Server misconfiguration")
+    
+    # Skip auth in development if no API key configured
+    if not settings.api_key:
+        logger.debug("Authentication disabled (development mode)")
         return token
     
-    if token not in valid_tokens:
+    # Validate token
+    if token != settings.api_key:
         logger.warning(f"Invalid API token attempted: {token[:10]}...")
         raise HTTPException(status_code=401, detail="Invalid API token")
     
@@ -53,6 +61,21 @@ app = FastAPI(
     description="Multi-agent system for generating production-ready ETL pipelines",
     version="1.0.0",
 )
+
+# Configure CORS middleware for Streamlit and browser access
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["*"],
+)
+
+# Configure trusted hosts for security
+if settings.is_production:
+    trusted_hosts = os.getenv("TRUSTED_HOSTS", "localhost").split(",")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
 
 # Global orchestrator instance (lazy-loaded)
 _orchestrator = None
@@ -87,6 +110,35 @@ def shutdown_event():
     """Handle application shutdown."""
     logger.info("Shutting down application...")
 
+
+# Global exception handler for unhandled errors
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle unhandled exceptions with proper logging and response.
+    
+    Args:
+        request: HTTP request that caused the exception
+        exc: The exception that was raised
+        
+    Returns:
+        JSON response with error details and request ID
+    """
+    logger.error(
+        f"Unhandled exception: {str(exc)}",
+        exc_info=True,
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "client": request.client.host if request.client else "unknown"
+        }
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "type": "internal_server_error"
+        }
+    )
 
 
 class UserStoryInput(BaseModel):
