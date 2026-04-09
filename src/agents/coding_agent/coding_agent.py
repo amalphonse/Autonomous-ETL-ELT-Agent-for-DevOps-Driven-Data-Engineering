@@ -53,27 +53,27 @@ PySpark code based on transformation requirements.
 
 For requirements like "Load orders and products, join on product_id, aggregate by product_category":
 
-{
+{{
   "main_pipeline_code": "from pyspark.sql import SparkSession\\nfrom pyspark.sql.functions import col, count, sum as spark_sum\\n\\ndef main():\\n    spark = SparkSession.builder.appName('OrderAnalysis').getOrCreate()\\n    orders = spark.read.delta('s3://data/orders')\\n    products = spark.read.delta('s3://data/products')\\n    joined = orders.join(products, on='product_id')\\n    result = joined.groupBy('product_category').agg(count('order_id').alias('order_count'), spark_sum('amount').alias('total_revenue'))\\n    result.write.delta('s3://output/results', mode='overwrite')",
-  "input_schema_model": {
+  "input_schema_model": {{
     "model_name": "OrderInput",
     "module_name": "models.input_schema",
     "code": "from pydantic import BaseModel, Field\\nfrom typing import Optional\\nfrom datetime import datetime\\n\\nclass OrderInput(BaseModel):\\n    order_id: str = Field(..., description='Unique order identifier')\\n    product_id: str = Field(..., description='Product identifier')\\n    amount: float = Field(..., description='Order amount')\\n    order_date: datetime = Field(..., description='Order date')",
     "fields": [
-      {"name": "order_id", "type": "str", "description": "Unique order identifier"},
-      {"name": "amount", "type": "float", "description": "Order amount"}
+      {{"name": "order_id", "type": "str", "description": "Unique order identifier"}},
+      {{"name": "amount", "type": "float", "description": "Order amount"}}
     ]
-  },
-  "output_schema_model": {
+  }},
+  "output_schema_model": {{
     "model_name": "OrderAnalysisOutput",
     "module_name": "models.output_schema",
     "code": "from pydantic import BaseModel, Field\\n\\nclass OrderAnalysisOutput(BaseModel):\\n    product_category: str = Field(..., description='Product category')\\n    order_count: int = Field(..., description='Total number of orders')\\n    total_revenue: float = Field(..., description='Total revenue for category')",
     "fields": [
-      {"name": "product_category", "type": "str", "description": "Product category"},
-      {"name": "order_count", "type": "int", "description": "Total number of orders"}
+      {{"name": "product_category", "type": "str", "description": "Product category"}},
+      {{"name": "order_count", "type": "int", "description": "Total number of orders"}}
     ]
-  }
-}
+  }}
+}}
 
 ---
 
@@ -221,7 +221,7 @@ Return ONLY the Python code as a string, no markdown wrapping."""
             )
 
         except Exception as e:
-            logger.error(f"Coding Agent execution failed: {str(e)}", exc_info=True)
+            logger.error(f"Coding Agent execution failed: {str(e)}")
             return self._error_output(f"Coding Agent failed: {str(e)}")
 
     def validate_input(self, agent_input: AgentInput) -> bool:

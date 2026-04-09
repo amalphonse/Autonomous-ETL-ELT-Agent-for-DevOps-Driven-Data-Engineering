@@ -183,7 +183,7 @@ class ExecutionAgent(Agent):
             )
 
         except Exception as e:
-            logger.error(f"Execution Agent failed: {str(e)}", exc_info=True)
+            logger.error(f"Execution Agent failed: {str(e)}")
             return self._error_output(f"Execution Agent failed: {str(e)}")
 
     def validate_input(self, agent_input: AgentInput) -> bool:

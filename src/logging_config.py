@@ -9,9 +9,9 @@ from src.config import get_settings
 # Get settings
 settings = get_settings()
 
-# Create logs directory if it doesn't exist
-log_dir = Path("logs")
-log_dir.mkdir(exist_ok=True)
+# Create logs directory if it doesn't exist (use absolute path for Cloud Run)
+log_dir = Path("/app/logs") if Path("/app").exists() else Path("logs")
+log_dir.mkdir(parents=True, exist_ok=True)
 
 # Remove default handler
 logger.remove()
@@ -53,9 +53,9 @@ else:
         colorize=False,
     )
 
-# File handler (always on)
+# File handler (always on) — use absolute path so it works in Cloud Run
 logger.add(
-    f"logs/etl_agent_{settings.environment}.log",
+    str(log_dir / f"etl_agent_{settings.environment}.log"),
     format=json_format if not settings.is_development else log_format,
     level=log_level,
     rotation="500 MB",  # Rotate when file reaches 500MB
@@ -65,7 +65,7 @@ logger.add(
 
 # Error log file (separate)
 logger.add(
-    f"logs/etl_agent_errors_{settings.environment}.log",
+    str(log_dir / f"etl_agent_errors_{settings.environment}.log"),
     format=json_format if not settings.is_development else log_format,
     level="ERROR",
     rotation="500 MB",
@@ -78,17 +78,24 @@ class InterceptHandler(logging.Handler):
     """Intercept standard logging calls and route to loguru."""
 
     def emit(self, record: logging.LogRecord) -> None:
-        level_name = record.levelname
-        frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
+        # Get corresponding Loguru level if it exists
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where the logged message originated
+        frame, depth = logging.currentframe(), 0
+        while frame and (frame.f_code.co_filename == logging.__file__ or
+                         frame.f_code.co_filename == __file__):
             frame = frame.f_back
             depth += 1
-        
-        logger.log(
-            level_name,
-            record.getMessage(),
-            _frame=frame,
-            _depth=depth,
+
+        # Use logger.opt() for depth/exception — do NOT pass kwargs to .log()
+        # because any kwargs would be used to .format() the message string,
+        # which breaks when messages contain JSON like {"title": "..."}.
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
         )
 
 

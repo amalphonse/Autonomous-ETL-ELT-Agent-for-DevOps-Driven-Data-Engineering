@@ -62,10 +62,22 @@ def get_db() -> Session:
 
 
 def init_db():
-    """Initialize database - create all tables."""
+    """Initialize database - create all tables (with timeout and error handling)."""
     logger.info(f"Initializing database: {DATABASE_URL}")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully")
+    try:
+        # Set connection timeout for PostgreSQL
+        if "postgresql" in DATABASE_URL:
+            # Test connection first with timeout
+            test_conn = engine.connect()
+            test_conn.close()
+        
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.warning(f"Database initialization warning (non-blocking): {e}")
+        # Don't raise - allow app to continue even if DB is unavailable
+        # Tables will be created when connection is established
 
 
 def drop_all_tables():

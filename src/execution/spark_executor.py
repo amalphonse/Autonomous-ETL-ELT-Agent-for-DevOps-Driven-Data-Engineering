@@ -101,7 +101,7 @@ class SparkExecutor:
             }
 
         except Exception as e:
-            logger.error(f"Error executing PySpark code: {str(e)}", exc_info=True)
+            logger.error(f"Error executing PySpark code: {str(e)}")
             duration = (datetime.utcnow() - start_time).total_seconds()
             return {
                 "status": "error",
@@ -279,7 +279,7 @@ class LocalSparkExecutor(SparkExecutor):
             }
 
         except Exception as e:
-            logger.error(f"Local execution failed: {str(e)}", exc_info=True)
+            logger.error(f"Local execution failed: {str(e)}")
             duration = (datetime.utcnow() - start_time).total_seconds()
             return {
                 "status": "failed",

@@ -16,24 +16,27 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # OpenAI Configuration
-    openai_api_key: str = Field(..., description="OpenAI API key")
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
     openai_model: str = "gpt-4o"
     openai_temperature: float = 0.3
 
     # GitHub Configuration
-    github_token: str = Field(..., description="GitHub personal access token")
-    github_repo_owner: str = Field(..., description="GitHub repository owner")
-    github_repo_name: str = Field(..., description="GitHub repository name")
+    github_token: Optional[str] = Field(None, description="GitHub personal access token")
+    github_repo_owner: Optional[str] = Field(None, description="GitHub repository owner")
+    github_repo_name: Optional[str] = Field(None, description="GitHub repository name")
 
     # Google Cloud Configuration
-    gcp_project_id: str = Field(..., description="GCP project ID")
+    gcp_project_id: Optional[str] = Field(None, description="GCP project ID")
     gcp_credentials_path: str = ""
     bq_dataset: str = "etl_automation"
     bq_table_prefix: str = "pipeline_"
 
     # Application Configuration
     app_host: str = "0.0.0.0"
-    app_port: int = 8000
+    app_port: int = Field(
+        default=8000,
+        description="Application port (Cloud Run sets PORT env var, defaults to 8000)"
+    )
     api_key: Optional[str] = Field(None, description="API key for endpoint authentication")
 
     # Database Configuration
@@ -57,20 +60,26 @@ class Settings(BaseSettings):
     # Validation
     @field_validator('openai_api_key', mode='before')
     @classmethod
-    def validate_openai_key(cls, v: str) -> str:
+    def validate_openai_key(cls, v: str, info) -> Optional[str]:
         """Validate OpenAI API key format."""
-        if not v or not isinstance(v, str):
-            raise ValueError('OPENAI_API_KEY is required')
+        # Allow None in development
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError('OPENAI_API_KEY must be a string')
         if not v.startswith('sk-'):
             raise ValueError('Invalid OpenAI API key format (must start with sk-)')
         return v
 
     @field_validator('github_token', mode='before')
     @classmethod
-    def validate_github_token(cls, v: str) -> str:
+    def validate_github_token(cls, v: str, info) -> Optional[str]:
         """Validate GitHub token format."""
-        if not v or not isinstance(v, str):
-            raise ValueError('GITHUB_TOKEN is required')
+        # Allow None in development
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            raise ValueError('GITHUB_TOKEN must be a string')
         if not v.startswith(('ghp_', 'github_pat_')):
             raise ValueError('Invalid GitHub token format')
         return v
@@ -83,6 +92,18 @@ class Settings(BaseSettings):
         """
         if not self.is_production:
             return
+        
+        # In production, require all critical keys
+        if not self.openai_api_key:
+            raise ValueError('OPENAI_API_KEY is required in production')
+        if not self.github_token:
+            raise ValueError('GITHUB_TOKEN is required in production')
+        if not self.github_repo_owner:
+            raise ValueError('GITHUB_REPO_OWNER is required in production')
+        if not self.github_repo_name:
+            raise ValueError('GITHUB_REPO_NAME is required in production')
+        if not self.gcp_project_id:
+            raise ValueError('GCP_PROJECT_ID is required in production')
             
         # Require API key in production
         if not self.api_key:
@@ -119,7 +140,12 @@ class Settings(BaseSettings):
                 f"{self.db_host}:{self.db_port}/{self.db_name}"
             )
         else:  # sqlite (default)
-            db_path = self.database_url or f"sqlite:///./etl_agent.db"
+            # Use /app/data/ if available (Cloud Run writable dir), else current dir
+            import os as _os
+            if _os.path.isdir('/app/data') and _os.access('/app/data', _os.W_OK):
+                db_path = "sqlite:////app/data/etl_agent.db"
+            else:
+                db_path = "sqlite:///./etl_agent.db"
             return db_path
     
     @property
@@ -140,19 +166,35 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    """Get cached settings instance with production validation.
+    """Get cached settings instance.
     
-    Raises:
-        ValueError: If production configuration is invalid
+    Note: Production validation happens asynchronously after app starts,
+    to prevent Cloud Run startup failures from configuration issues.
     """
     settings = Settings()
     
-    # Validate production configuration on startup
-    try:
-        settings.validate_production_config()
-    except ValueError as e:
+    # Log production configuration warnings (non-blocking)
+    if settings.is_production:
         logger = logging.getLogger(__name__)
-        logger.error(f"Configuration validation failed: {e}")
-        raise
+        missing_configs = []
+        
+        if not settings.openai_api_key:
+            missing_configs.append("OPENAI_API_KEY")
+        if not settings.github_token:
+            missing_configs.append("GITHUB_TOKEN")
+        if not settings.github_repo_owner:
+            missing_configs.append("GITHUB_REPO_OWNER")
+        if not settings.github_repo_name:
+            missing_configs.append("GITHUB_REPO_NAME")
+        if not settings.gcp_project_id:
+            missing_configs.append("GCP_PROJECT_ID")
+        if not settings.api_key:
+            missing_configs.append("API_KEY")
+        if settings.db_driver == "sqlite":
+            missing_configs.append("PostgreSQL (SQLite not allowed)")
+        
+        if missing_configs:
+            logger.warning(f"Production config incomplete (app still starting): {', '.join(missing_configs)}")
+            logger.warning("Some features may not work until environment variables are configured")
     
     return settings

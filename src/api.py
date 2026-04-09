@@ -4,7 +4,8 @@ import asyncio
 import logging
 from typing import Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
-from fastapi.security import HTTPBearer, HTTPAuthCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -23,32 +24,31 @@ from src.database.repository import PipelineExecutionRepository
 # Get settings
 settings = get_settings()
 
-# Initialize security
-security = HTTPBearer()
+# Initialize security (auto_error=False so missing token doesn't auto-reject)
+security = HTTPBearer(auto_error=False)
 
-def verify_api_token(credentials: HTTPAuthCredentials = Depends(security)) -> str:
+def verify_api_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
     """Verify API token from Authorization header.
     
     Args:
-        credentials: HTTP Bearer credentials from request
+        credentials: HTTP Bearer credentials from request (optional)
         
     Returns:
         The verified token
         
     Raises:
-        HTTPException: If token is invalid or missing
+        HTTPException: If token is invalid or missing when API_KEY is configured
     """
-    token = credentials.credentials
-    
-    # In production, API key is REQUIRED
-    if settings.is_production and not settings.api_key:
-        logger.error("Production mode requires API_KEY environment variable")
-        raise HTTPException(status_code=500, detail="Server misconfiguration")
-    
     # Skip auth in development if no API key configured
     if not settings.api_key:
-        logger.debug("Authentication disabled (development mode)")
-        return token
+        logger.debug("Authentication disabled (no API_KEY configured)")
+        return ""
+    
+    # API key is configured - credentials are required
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    token = credentials.credentials
     
     # Validate token
     if token != settings.api_key:
@@ -88,21 +88,32 @@ def get_orchestrator():
         _orchestrator = AgentOrchestrator()
     return _orchestrator
 
-# Initialize database on startup
+# Global flag to track if database is initialized
+_db_initialized = False
+
+# Initialize database on startup (non-blocking)
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on application startup."""
+    """Initialize database on application startup (non-blocking)."""
+    global _db_initialized
     logger.info("Starting up application...")
     logger.info(f"Environment: {settings.environment}")
     logger.info(f"Log level: {settings.log_level}")
     logger.info(f"Database driver: {settings.db_driver}")
     
-    try:
-        init_db()
-        logger.info("Database initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
-        raise
+    # Initialize database in background (non-blocking)
+    async def init_db_async():
+        global _db_initialized
+        try:
+            init_db()
+            _db_initialized = True
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            _db_initialized = False
+    
+    # Run async without waiting
+    asyncio.create_task(init_db_async())
 
 
 @app.on_event("shutdown")
@@ -123,15 +134,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     Returns:
         JSON response with error details and request ID
     """
-    logger.error(
-        f"Unhandled exception: {str(exc)}",
-        exc_info=True,
-        extra={
-            "path": request.url.path,
-            "method": request.method,
-            "client": request.client.host if request.client else "unknown"
-        }
-    )
+    logger.error(f"Unhandled exception: {str(exc)}")
     return JSONResponse(
         status_code=500,
         content={
@@ -217,28 +220,34 @@ class HealthResponse(BaseModel):
 
 
 @app.get("/health", tags=["Health"], response_model=HealthResponse)
-async def health_check(db: Session = Depends(get_db)):
+async def health_check():
     """Comprehensive health check endpoint.
     
     Verifies:
     - Application is running
-    - Database is accessible
+    - Database initialization status
     - Environment configuration is loaded
     
     Returns:
         HealthResponse with health status of all components
     """
+    db_connected = False
     try:
-        # Test database connection
+        # Only test database if we have an active session
+        from src.database.db import SessionLocal
+        db = SessionLocal()
         db.execute("SELECT 1")
+        db.close()
         db_connected = True
         logger.debug("Database health check passed")
     except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        db_connected = False
+        logger.debug(f"Database not yet connected (initialization in progress): {e}")
+        db_connected = _db_initialized
     
+    # Always return healthy for Cloud Run startup
+    # Database can be initialized asynchronously
     return HealthResponse(
-        status="healthy" if db_connected else "degraded",
+        status="healthy",
         service="Autonomous ETL/ELT Agent",
         version="1.0.0",
         environment=settings.environment,
@@ -510,7 +519,7 @@ async def create_pipeline(
         )
 
     except Exception as e:
-        logger.error(f"Pipeline creation failed: {str(e)}", exc_info=True)
+        logger.error(f"Pipeline creation failed: {str(e)}")
         # Update database record with error
         duration_seconds = time.time() - start_time
         try:

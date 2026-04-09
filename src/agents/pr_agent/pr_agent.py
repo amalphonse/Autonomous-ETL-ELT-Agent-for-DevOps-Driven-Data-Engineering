@@ -7,6 +7,12 @@ from datetime import datetime
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
+try:
+    from github import Github, GithubException
+    GITHUB_AVAILABLE = True
+except ImportError:
+    GITHUB_AVAILABLE = False
+
 from src.config import get_settings
 from src.types import Agent, AgentType, AgentStatus, AgentInput, AgentOutput
 from src.agents.pr_agent.schemas import (
@@ -169,13 +175,29 @@ Requirements:
             # Step 7: Generate next steps
             next_steps = self._generate_next_steps(pr_input, quality_score)
 
-            # Step 8: Create output
+            # Step 8: Create actual GitHub PR
+            pr_url = None
+            pr_number = None
+            pr_created = False
+            try:
+                pr_url, pr_number = self._create_github_pr(
+                    pr_input, pull_request, branch_name, pr_template
+                )
+                pr_created = pr_url is not None
+                if pr_url:
+                    pull_request.pr_url = pr_url
+                    pull_request.pr_number = pr_number
+                    logger.info(f"GitHub PR created: {pr_url}")
+            except Exception as gh_err:
+                logger.warning(f"GitHub PR creation failed (non-fatal): {gh_err}")
+
+            # Step 9: Create output
             pr_output = PRAgentOutput(
                 pull_request=pull_request,
-                pr_created_successfully=True,  # Would be actual result in real implementation
+                pr_created_successfully=pr_created,
                 pr_quality_score=quality_score,
-                pr_url=None,  # Would be assigned by GitHub API in real implementation
-                commit_shas=[],  # Would be assigned after push in real implementation
+                pr_url=pr_url,
+                commit_shas=[],
                 next_steps=next_steps,
             )
 
@@ -188,8 +210,114 @@ Requirements:
             )
 
         except Exception as e:
-            logger.error(f"PR Agent execution failed: {str(e)}", exc_info=True)
+            logger.error(f"PR Agent execution failed: {str(e)}")
             return self._error_output(f"PR Agent failed: {str(e)}")
+
+    def _create_github_pr(
+        self,
+        pr_input: "PRAgentInput",
+        pull_request: GeneratedPullRequest,
+        branch_name: str,
+        pr_template: "PullRequestTemplate",
+    ):
+        """Create an actual GitHub Pull Request using PyGithub.
+
+        Returns:
+            Tuple of (pr_url, pr_number) or (None, None) on failure.
+        """
+        if not GITHUB_AVAILABLE:
+            logger.warning("PyGithub not installed — skipping GitHub PR creation")
+            return None, None
+
+        token = (
+            pr_input.repository.github_token
+            or self.settings.github_token
+        )
+        if not token:
+            logger.warning("No GitHub token configured — skipping PR creation")
+            return None, None
+
+        owner = pr_input.repository.owner or self.settings.github_repo_owner
+        repo_name = pr_input.repository.repo_name or self.settings.github_repo_name
+        if not owner or not repo_name:
+            logger.warning("GitHub owner/repo not configured — skipping PR creation")
+            return None, None
+
+        try:
+            gh = Github(token)
+            repo = gh.get_repo(f"{owner}/{repo_name}")
+
+            # Get default branch
+            default_branch = repo.default_branch  # e.g. "main"
+            base_sha = repo.get_branch(default_branch).commit.sha
+
+            # Create feature branch
+            try:
+                repo.create_git_ref(ref=f"refs/heads/{branch_name}", sha=base_sha)
+                logger.info(f"Created branch: {branch_name}")
+            except GithubException as e:
+                if e.status == 422:  # branch already exists
+                    logger.warning(f"Branch {branch_name} already exists, reusing")
+                else:
+                    raise
+
+            # Commit all code + test files to the branch
+            all_files = {}
+            all_files.update(pr_input.generated_code_files)
+            all_files.update(pr_input.generated_test_files)
+
+            for file_path, content in all_files.items():
+                if not content or not content.strip():
+                    continue
+                try:
+                    # Try to update if exists, else create
+                    try:
+                        existing = repo.get_contents(file_path, ref=branch_name)
+                        repo.update_file(
+                            path=file_path,
+                            message=f"Update {file_path} via ETL agent",
+                            content=content,
+                            sha=existing.sha,
+                            branch=branch_name,
+                        )
+                    except GithubException:
+                        repo.create_file(
+                            path=file_path,
+                            message=f"Add {file_path} via ETL agent",
+                            content=content,
+                            branch=branch_name,
+                        )
+                except Exception as fe:
+                    logger.warning(f"Failed to commit {file_path}: {fe}")
+
+            # Create the Pull Request
+            pr_body = pr_template.description
+            if pr_template.changes_summary:
+                pr_body += f"\n\n## Changes\n{pr_template.changes_summary}"
+            if pr_template.testing_notes:
+                pr_body += f"\n\n## Testing\n{pr_template.testing_notes}"
+
+            gh_pr = repo.create_pull(
+                title=pull_request.pr_title,
+                body=pr_body,
+                head=branch_name,
+                base=default_branch,
+                draft=pull_request.is_draft,
+            )
+
+            # Apply labels if any
+            if pull_request.labels:
+                try:
+                    gh_pr.add_to_labels(*pull_request.labels)
+                except Exception:
+                    pass
+
+            logger.info(f"GitHub PR #{gh_pr.number} created: {gh_pr.html_url}")
+            return gh_pr.html_url, gh_pr.number
+
+        except Exception as e:
+            logger.error(f"GitHub PR creation error: {e}")
+            return None, None
 
     def validate_input(self, agent_input: AgentInput) -> bool:
         """Validate that the input is valid for PR creation.

@@ -152,7 +152,7 @@ class AgentOrchestrator:
             return initial_state
 
         except Exception as e:
-            logger.error(f"Orchestration failed: {str(e)}", exc_info=True)
+            logger.error(f"Orchestration failed: {str(e)}")
             initial_state["status"] = "failed"
             initial_state["error"] = str(e)
             return initial_state
@@ -370,6 +370,10 @@ class AgentOrchestrator:
             # Get story info from parsed requirements
             requirements = state.get("parsed_requirements", {})
 
+            # Get GitHub settings for actual PR creation
+            from src.config import get_settings as _get_settings
+            _settings = _get_settings()
+
             # Prepare input for PR Agent
             pr_input = {
                 "generated_code_files": code_files or {"src/pipeline.py": "# Generated code"},
@@ -379,8 +383,9 @@ class AgentOrchestrator:
                 "code_quality_score": state["code_quality_score"],
                 "test_quality_score": state["test_quality_score"],
                 "repository": {
-                    "owner": "amalphonse",
-                    "repo_name": "Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering",
+                    "owner": _settings.github_repo_owner or "amalphonse",
+                    "repo_name": _settings.github_repo_name or "Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering",
+                    "github_token": _settings.github_token,
                 },
             }
 

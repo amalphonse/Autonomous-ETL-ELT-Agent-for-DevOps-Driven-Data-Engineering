@@ -57,7 +57,7 @@ gcloud config set project $PROJECT_ID
 # Enable required APIs
 echo -e "\n${YELLOW}Enabling required GCP APIs...${NC}"
 gcloud services enable \
-    cloudrun.googleapis.com \
+    run.googleapis.com \
     artifactregistry.googleapis.com \
     cloudbuild.googleapis.com \
     secretmanager.googleapis.com
@@ -187,11 +187,20 @@ fi
 ENV_VARS="$ENV_VARS,ALLOWED_ORIGINS=*"
 
 echo -e "Deploying API service..."
+
+# Prepare authentication flag
+AUTH_FLAG=""
+if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then
+    AUTH_FLAG="--allow-unauthenticated"
+else
+    AUTH_FLAG="--no-allow-unauthenticated"
+fi
+
 gcloud run deploy etl-api \
     --image $IMAGE_URL \
     --platform managed \
     --region $REGION \
-    --allow-unauthenticated=$ALLOW_UNAUTHENTICATED \
+    $AUTH_FLAG \
     --memory $MEMORY \
     --cpu $CPU \
     --timeout $TIMEOUT \
@@ -216,14 +225,14 @@ gcloud run deploy etl-dashboard \
     --image $IMAGE_URL \
     --platform managed \
     --region $REGION \
-    --allow-unauthenticated=true \
-    --memory 512Mi \
+    --allow-unauthenticated \
+    --memory 1Gi \
     --cpu 1 \
     --timeout 600 \
     --max-instances 5 \
-    --set-env-vars "$STREAMLIT_ENV_VARS" \
-    --entrypoint "streamlit" \
-    --args "run,streamlit_app.py,--logger.level=error,--server.headless=true" \
+    --set-env-vars "$STREAMLIT_ENV_VARS,STREAMLIT_SERVER_PORT=8080,STREAMLIT_SERVER_ADDRESS=0.0.0.0,STREAMLIT_SERVER_HEADLESS=true" \
+    --command "streamlit" \
+    --args "run,streamlit_app.py,--logger.level=error" \
     --quiet
 
 # Get dashboard URL

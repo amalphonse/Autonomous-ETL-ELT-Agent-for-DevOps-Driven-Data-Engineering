@@ -62,23 +62,23 @@ frequency (total transactions), and monetary value (total spent). Filter for cus
 frequency > 5. Write to Snowflake customer_rfm table."
 
 **Expected Output:**
-{
+{{
   "title": "Customer RFM Analysis",
-  "input_sources": [{"name": "salesforce_transactions", "location": "salesforce.public.transactions", 
-    "format": "sql", "schema": [{"name": "transaction_id", "data_type": "string"}, 
-    {"name": "customer_id", "data_type": "string"}, {"name": "amount", "data_type": "float"}, 
-    {"name": "transaction_date", "data_type": "timestamp"}]}],
+  "input_sources": [{{"name": "salesforce_transactions", "location": "salesforce.public.transactions", 
+    "format": "sql", "schema": [{{"name": "transaction_id", "data_type": "string"}}, 
+    {{"name": "customer_id", "data_type": "string"}}, {{"name": "amount", "data_type": "float"}}, 
+    {{"name": "transaction_date", "data_type": "timestamp"}}]}}],
   "transformation_steps": [
-    {"step_id": "step-1", "transformation_type": "aggregate", "input_table": "transactions",
+    {{"step_id": "step-1", "transformation_type": "aggregate", "input_table": "transactions",
      "group_by": ["customer_id"], 
-     "aggregations": [{"function": "MAX", "column": "transaction_date", "alias": "last_purchase_date"},
-                      {"function": "COUNT", "column": "transaction_id", "alias": "purchase_frequency"},
-                      {"function": "SUM", "column": "amount", "alias": "total_spent"}]},
-    {"step_id": "step-2", "transformation_type": "filter", "input_table": "step-1",
-     "conditions": [{"column": "purchase_frequency", "operator": ">", "value": 5}]}],
+     "aggregations": [{{"function": "MAX", "column": "transaction_date", "alias": "last_purchase_date"}},
+                      {{"function": "COUNT", "column": "transaction_id", "alias": "purchase_frequency"}},
+                      {{"function": "SUM", "column": "amount", "alias": "total_spent"}}]}},
+    {{"step_id": "step-2", "transformation_type": "filter", "input_table": "step-1",
+     "conditions": [{{"column": "purchase_frequency", "operator": ">", "value": 5}}]}}],
   "data_quality_rules": ["customer_id NOT NULL", "total_spent > 0"],
   "output_location": "snowflake.analytics.customer_rfm"
-}
+}}
 
 ### Example 2: Product Orders Aggregation
 **Input Story:**
@@ -86,19 +86,19 @@ frequency > 5. Write to Snowflake customer_rfm table."
 to get total revenue and order count."
 
 **Expected Output:**
-{
+{{
   "title": "Product Orders Aggregation",
   "transformation_steps": [
-    {"step_id": "step-1", "transformation_type": "filter", 
-     "conditions": [{"column": "order_status", "operator": "==", "value": "completed"},
-                    {"column": "order_date", "operator": ">", "value": "last 12 months"}]},
-    {"step_id": "step-2", "transformation_type": "join", "left_table": "orders", "right_table": "products",
-     "join_keys": [{"left": "product_id", "right": "product_id"}], "join_type": "inner"},
-    {"step_id": "step-3", "transformation_type": "aggregate", "group_by": ["product_category"],
-     "aggregations": [{"function": "SUM", "column": "order_amount", "alias": "total_revenue"},
-                      {"function": "COUNT", "column": "order_id", "alias": "order_count"}]}
+    {{"step_id": "step-1", "transformation_type": "filter", 
+     "conditions": [{{"column": "order_status", "operator": "==", "value": "completed"}},
+                    {{"column": "order_date", "operator": ">", "value": "last 12 months"}}]}},
+    {{"step_id": "step-2", "transformation_type": "join", "left_table": "orders", "right_table": "products",
+     "join_keys": [{{"left": "product_id", "right": "product_id"}}], "join_type": "inner"}},
+    {{"step_id": "step-3", "transformation_type": "aggregate", "group_by": ["product_category"],
+     "aggregations": [{{"function": "SUM", "column": "order_amount", "alias": "total_revenue"}},
+                      {{"function": "COUNT", "column": "order_id", "alias": "order_count"}}]}}
   ]
-}
+}}
 
 ---
 
@@ -243,7 +243,7 @@ make a reasonable inference based on common data engineering patterns."""
             )
 
         except Exception as e:
-            logger.error(f"Task Agent execution failed: {str(e)}", exc_info=True)
+            logger.error(f"Task Agent execution failed: {str(e)}")
             return self._error_output(f"Task Agent failed: {str(e)}")
 
     def validate_input(self, agent_input: AgentInput) -> bool:

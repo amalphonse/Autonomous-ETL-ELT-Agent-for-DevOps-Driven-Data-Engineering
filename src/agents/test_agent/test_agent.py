@@ -215,7 +215,7 @@ Make sure each test:
             )
 
         except Exception as e:
-            logger.error(f"Test Agent execution failed: {str(e)}", exc_info=True)
+            logger.error(f"Test Agent execution failed: {str(e)}")
             return self._error_output(f"Test Agent failed: {str(e)}")
 
     def validate_input(self, agent_input: AgentInput) -> bool:
