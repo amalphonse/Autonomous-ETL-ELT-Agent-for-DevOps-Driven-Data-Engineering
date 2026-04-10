@@ -1,20 +1,27 @@
 # Autonomous ETL/ELT Agent for DevOps-Driven Data Engineering
 
-An AI-powered agentic system that automates the Data Engineering lifecycle—transforming DevOps user stories into production-ready, tested, and PR-ready Spark pipelines.
+An AI-powered agentic system that automates the Data Engineering lifecycle — transforming DevOps user stories into production-ready, tested, and PR-ready PySpark pipelines, fully deployed on Google Cloud Run.
+
+> **Live Demo:**
+> - 🌐 **API:** https://etl-api-903384289600.us-central1.run.app
+> - 📊 **Dashboard:** https://etl-dashboard-903384289600.us-central1.run.app
+> - 📖 **API Docs:** https://etl-api-903384289600.us-central1.run.app/docs
+> - 🔀 **Generated PRs:** https://github.com/amalphonse/Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering/pulls
 
 ## 🚀 Project Overview
 
 This system minimizes manual effort in the DE lifecycle by using **Agentic AI** to interpret requirements and generate code that aligns with organizational standards. It specifically targets the transition from a "User Story" to a "Pull Request" without human intervention for standard ETL tasks.
 
 ### Key Features
-* **NLP Story Parsing:** Extracts transformation intent (filter, join, aggregate) from JSON/YAML DevOps tasks.
+* **NLP Story Parsing:** Extracts transformation intent (filter, join, aggregate) from natural-language user stories.
 * **Automated Spark Generation:** Produces modular PySpark code using Delta Lake patterns.
-* **Autonomous Validation:** Auto-generates and runs `pytest` suites including null-checks and schema assertions.
+* **Autonomous Validation:** Auto-generates `pytest` suites including null-checks and schema assertions.
 * **Code Execution:** Safely executes generated PySpark code with error recovery and metrics capture.
 * **Data Lineage Tracking:** Extracts and visualizes data flows with OpenLineage protocol compliance for full data governance.
 * **Persistent Storage:** SQLite database tracks all executions with full audit trail and analytics.
-* **Git Automation:** Creates branches, commits code, and raises Pull Requests via GitHub API.
+* **Git Automation:** Creates branches, commits code, and raises Pull Requests via GitHub API (PyGithub).
 * **REST API:** FastAPI endpoints for pipeline creation, querying, analytics, and lineage visualization.
+* **Streamlit Dashboard:** Interactive UI for story submission, execution history, and analytics.
 
 ## 🏗 Architecture
 
@@ -132,13 +139,15 @@ graph TB
 - **SparkExecutor** safely runs PySpark code with environment isolation
 
 ## 🛠 Tech Stack
-* **AI Engine:** OpenAI GPT-4o / LangChain / LangGraph
+* **AI Engine:** OpenAI GPT-4o / LangChain 0.1.20 / LangGraph 0.0.30
 * **Data Processing:** Apache Spark (PySpark) & Delta Lake
-* **Data Warehouse:** Google BigQuery (Storage & Ingestion)
-* **Validation:** Pydantic (Schema) & Pytest (Logic)
-* **API/Web:** FastAPI & Uvicorn
-* **Database:** SQLite with SQLAlchemy 2.0 ORM & Alembic migrations
-* **DevOps:** GitHub API (PyGithub)
+* **Validation:** Pydantic 2.7.4 (Schema) & Pytest (Logic)
+* **API/Web:** FastAPI 0.109 & Uvicorn
+* **UI:** Streamlit 1.28
+* **Database:** SQLite with SQLAlchemy 2.0 ORM
+* **DevOps:** GitHub API (PyGithub 2.1.1)
+* **Cloud:** Google Cloud Run (serverless, us-central1)
+* **Logging:** Loguru structured logging
 
 ## 📂 Project Structure
 ```text
@@ -164,32 +173,59 @@ graph TB
 
 ## 🚀 Quick Start
 
-### Prerequisites
-- Python 3.12+
-- Apache Spark 3.5.0+ (for code execution)
-- OpenAI API key
-- GitHub PAT token (for PR operations)
+### Option A — Use the Live Cloud Run Deployment
 
-### Installation
+The API and dashboard are already deployed and running:
+
+```bash
+# Health check
+curl https://etl-api-903384289600.us-central1.run.app/health
+
+# Run a pipeline (calls OpenAI + creates GitHub PR)
+curl -X POST https://etl-api-903384289600.us-central1.run.app/pipelines/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Customer Orders ETL Pipeline",
+    "description": "Load customer orders from S3 CSV files, join with product catalog on product_id, filter completed orders from last 12 months, aggregate by product category to calculate total revenue and order count, write results to Snowflake analytics_summary table.",
+    "source_system": "S3 CSV files",
+    "target_system": "Snowflake Data Warehouse"
+  }'
+```
+
+Or use the **[Streamlit Dashboard](https://etl-dashboard-903384289600.us-central1.run.app)** for a guided UI experience.
+
+---
+
+### Option B — Run Locally
+
+#### Prerequisites
+- Python 3.12+
+- OpenAI API key
+- GitHub Personal Access Token (for PR creation)
+
+#### Installation
 
 1. **Clone the repository:**
 ```bash
-git clone <your-repo-url>
-cd autonomous_ETL_ELT_DevOps_Project
+git clone https://github.com/amalphonse/Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering.git
+cd Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering
 ```
 
-2. **Create environment variables:**
+2. **Create a virtual environment and install dependencies:**
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+3. **Create environment variables:**
 ```bash
 cp .env.example .env
-# Edit .env with your credentials:
-# - OPENAI_API_KEY
-# - GITHUB_TOKEN
-# - GITHUB_REPO_URL
-```
-
-3. **Install dependencies:**
-```bash
-pip install -r requirements.txt
+# Edit .env and set:
+# OPENAI_API_KEY=<your-key>
+# GITHUB_TOKEN=<your-pat>
+# GITHUB_REPO_OWNER=<your-github-username>
+# GITHUB_REPO_NAME=<your-repo-name>
 ```
 
 4. **Initialize database:**
@@ -210,6 +246,16 @@ streamlit run streamlit_app.py
 ```
 
 Dashboard opens at `http://localhost:8501`
+
+---
+
+### Option C — Docker
+
+```bash
+docker-compose up --build
+# API: http://localhost:8000
+# Dashboard: http://localhost:8501
+```
 
 ---
 
@@ -263,9 +309,11 @@ See [DEMO_GUIDE.md](DEMO_GUIDE.md) for more detailed examples and instructions.
 
 **POST** `/pipelines/create` (Production)
 - Creates and executes a new pipeline with full agent orchestration
-- Requires OpenAI API key and GitHub token
+- Requires OpenAI API key and GitHub token configured in Cloud Run env vars
 - Uses all 5 agents: Task, Coding, Test, Execution, PR
-- Response: Real generated PySpark code and artifacts
+- Response: Real generated PySpark code, tests, and a GitHub PR link
+
+> **Note on Execution Agent:** PySpark requires a distributed Spark cluster (e.g., Dataproc, Databricks, EMR) and cannot run inside a serverless Cloud Run container. The Execution Agent logs a warning and the pipeline continues gracefully — code and PR are still generated successfully. In a production setup, the Execution Agent would submit the job to a real Spark cluster.
 
 ### Pipeline Queries
 **GET** `/pipelines`
@@ -309,7 +357,17 @@ See [DEMO_GUIDE.md](DEMO_GUIDE.md) for more detailed examples and instructions.
 ### Health Check
 **GET** `/health`
 - System health status
-- Response: `{status: "ok"}`
+- Response:
+```json
+{
+  "status": "healthy",
+  "service": "Autonomous ETL/ELT Agent",
+  "version": "1.0.0",
+  "environment": "development",
+  "database": "sqlite",
+  "database_connected": true
+}
+```
 
 ## 💾 Database Schema
 
@@ -393,6 +451,30 @@ df_summary.write.format("parquet").save("s3://output/customer_summary.parquet")
 - **Database:** SQLite for development; PostgreSQL recommended for production with encryption
 
 ## 🚀 Deployment & Production Readiness
+
+### ☁️ Current Deployment — Google Cloud Run
+
+The service is live on Cloud Run (serverless, auto-scaling, us-central1):
+
+| Service | URL | Status |
+|---|---|---|
+| API | https://etl-api-903384289600.us-central1.run.app | ✅ Live |
+| Dashboard | https://etl-dashboard-903384289600.us-central1.run.app | ✅ Live |
+
+**Active revision:** `etl-api-00020-bkj`
+
+To deploy your own instance, see [DEPLOYMENT_GCP.md](DEPLOYMENT_GCP.md) for the full Cloud Run guide.
+
+```bash
+# Quick redeploy after code changes
+docker build -t us-central1-docker.pkg.dev/<project>/etl-agent-repo/etl-api:latest .
+docker push us-central1-docker.pkg.dev/<project>/etl-agent-repo/etl-api:latest
+gcloud run services update etl-api \
+  --image us-central1-docker.pkg.dev/<project>/etl-agent-repo/etl-api:latest \
+  --region us-central1
+```
+
+---
 
 ### Docker Setup
 
