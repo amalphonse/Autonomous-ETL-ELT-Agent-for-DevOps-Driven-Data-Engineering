@@ -1,19 +1,16 @@
-import logging
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, when, sum as spark_sum
-from pyspark.sql.types import BooleanType
-from models.input_schema import InputSchema
-from models.output_schema import OutputSchema
-from utils import validate_schema
+from pyspark.sql.functions import col, expr, sum as spark_sum
+import logging
+from typing import Tuple
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def create_spark_session() -> SparkSession:
     """
-    Main function to execute the product inventory sync pipeline.
+    Create and return a Spark session.
     """
     try:
         spark = SparkSession.builder \
@@ -21,100 +18,130 @@ def main() -> None:
             .config('spark.sql.extensions', 'io.delta.sql.DeltaSparkSessionExtension') \
             .config('spark.sql.catalog.spark_catalog', 'org.apache.spark.sql.delta.catalog.DeltaCatalog') \
             .getOrCreate()
-
-        inventory_snapshots = load_inventory_snapshots(spark)
-        supplier_catalog = load_supplier_catalog(spark)
-
-        enriched_inventory = join_inventory_with_catalog(inventory_snapshots, supplier_catalog)
-        active_inventory = filter_inactive_products(enriched_inventory)
-        inventory_with_reorder_flag = calculate_reorder_flag(active_inventory)
-        warehouse_inventory_summary = aggregate_inventory_value(inventory_with_reorder_flag)
-
-        save_to_snowflake(warehouse_inventory_summary)
-
+        logger.info('Spark session created successfully.')
+        return spark
     except Exception as e:
-        logger.error(f"Error in main pipeline: {e}")
+        logger.error(f'Error creating Spark session: {e}')
         raise
 
 
-def load_inventory_snapshots(spark: SparkSession) -> DataFrame:
+def load_data(spark: SparkSession) -> Tuple[DataFrame, DataFrame]:
     """
-    Load inventory snapshots from PostgreSQL.
+    Load data from PostgreSQL tables.
     """
-    logger.info("Loading inventory snapshots from PostgreSQL")
-    # Placeholder for actual data loading logic
-    return spark.read.format('jdbc').options(
-        url='jdbc:postgresql://your_postgres_url',
-        dbtable='public.inventory_snapshots',
-        user='your_username',
-        password='your_password'
-    ).load()
+    try:
+        inventory_snapshots = spark.read.format('jdbc') \
+            .option('url', 'jdbc:postgresql://your_postgres_url') \
+            .option('dbtable', 'public.inventory_snapshots') \
+            .option('user', 'your_user') \
+            .option('password', 'your_password') \
+            .load()
+
+        supplier_catalog = spark.read.format('jdbc') \
+            .option('url', 'jdbc:postgresql://your_postgres_url') \
+            .option('dbtable', 'public.supplier_catalog') \
+            .option('user', 'your_user') \
+            .option('password', 'your_password') \
+            .load()
+
+        logger.info('Data loaded successfully from PostgreSQL.')
+        return inventory_snapshots, supplier_catalog
+    except Exception as e:
+        logger.error(f'Error loading data: {e}')
+        raise
 
 
-def load_supplier_catalog(spark: SparkSession) -> DataFrame:
-    """
-    Load supplier catalog from PostgreSQL.
-    """
-    logger.info("Loading supplier catalog from PostgreSQL")
-    # Placeholder for actual data loading logic
-    return spark.read.format('jdbc').options(
-        url='jdbc:postgresql://your_postgres_url',
-        dbtable='public.supplier_catalog',
-        user='your_username',
-        password='your_password'
-    ).load()
-
-
-def join_inventory_with_catalog(inventory_snapshots: DataFrame, supplier_catalog: DataFrame) -> DataFrame:
+def join_data(inventory_snapshots: DataFrame, supplier_catalog: DataFrame) -> DataFrame:
     """
     Join inventory snapshots with supplier catalog on supplier_id.
     """
-    logger.info("Joining inventory snapshots with supplier catalog")
-    return inventory_snapshots.join(supplier_catalog, on='supplier_id', how='inner')
+    try:
+        joined_data = inventory_snapshots.join(supplier_catalog, on='supplier_id', how='inner')
+        logger.info('Data joined successfully.')
+        return joined_data
+    except Exception as e:
+        logger.error(f'Error joining data: {e}')
+        raise
 
 
-def filter_inactive_products(enriched_inventory: DataFrame) -> DataFrame:
+def filter_inactive_products(joined_data: DataFrame) -> DataFrame:
     """
-    Filter out inactive products.
+    Filter out discontinued products where status = 'inactive'.
     """
-    logger.info("Filtering out inactive products")
-    return enriched_inventory.filter(col('status') != 'inactive')
+    try:
+        filtered_data = joined_data.filter(col('status') != 'inactive')
+        logger.info('Inactive products filtered out.')
+        return filtered_data
+    except Exception as e:
+        logger.error(f'Error filtering inactive products: {e}')
+        raise
 
 
-def calculate_reorder_flag(active_inventory: DataFrame) -> DataFrame:
+def calculate_reorder_flag(filtered_data: DataFrame) -> DataFrame:
     """
-    Calculate reorder flag for products.
+    Calculate reorder_flag for items where quantity_on_hand is below reorder_threshold.
     """
-    logger.info("Calculating reorder flags")
-    return active_inventory.withColumn('reorder_flag', (col('quantity_on_hand') < col('reorder_threshold')).cast(BooleanType()))
+    try:
+        reorder_flag_data = filtered_data.withColumn('reorder_flag', expr('quantity_on_hand < reorder_threshold'))
+        logger.info('Reorder flag calculated.')
+        return reorder_flag_data
+    except Exception as e:
+        logger.error(f'Error calculating reorder flag: {e}')
+        raise
 
 
-def aggregate_inventory_value(inventory_with_reorder_flag: DataFrame) -> DataFrame:
+def aggregate_inventory_value(reorder_flag_data: DataFrame) -> DataFrame:
     """
     Aggregate total inventory value per warehouse.
     """
-    logger.info("Aggregating total inventory value per warehouse")
-    return inventory_with_reorder_flag.groupBy('warehouse_id').agg(
-        spark_sum(col('quantity_on_hand') * col('unit_cost')).alias('total_inventory_value')
-    )
+    try:
+        aggregated_data = reorder_flag_data.groupBy('warehouse_id').agg(
+            spark_sum(expr('quantity_on_hand * unit_cost')).alias('total_inventory_value')
+        )
+        logger.info('Inventory value aggregated per warehouse.')
+        return aggregated_data
+    except Exception as e:
+        logger.error(f'Error aggregating inventory value: {e}')
+        raise
 
 
-def save_to_snowflake(df: DataFrame) -> None:
+def write_data(aggregated_data: DataFrame):
     """
-    Save the result to Snowflake.
+    Write the result to Snowflake.
     """
-    logger.info("Saving results to Snowflake")
-    # Placeholder for actual Snowflake saving logic
-    df.write.format('snowflake').options(
-        sfURL='your_snowflake_url',
-        sfDatabase='analytics',
-        sfSchema='public',
-        sfWarehouse='your_warehouse',
-        sfRole='your_role',
-        sfUser='your_user',
-        sfPassword='your_password',
-        dbtable='warehouse_inventory_summary'
-    ).mode('overwrite').save()
+    try:
+        aggregated_data.write.format('snowflake') \
+            .option('sfURL', 'your_snowflake_url') \
+            .option('sfDatabase', 'analytics') \
+            .option('sfSchema', 'public') \
+            .option('sfWarehouse', 'your_warehouse') \
+            .option('sfRole', 'your_role') \
+            .option('sfUser', 'your_user') \
+            .option('sfPassword', 'your_password') \
+            .option('dbtable', 'warehouse_inventory_summary') \
+            .mode('overwrite') \
+            .save()
+        logger.info('Data written to Snowflake successfully.')
+    except Exception as e:
+        logger.error(f'Error writing data to Snowflake: {e}')
+        raise
+
+
+def main():
+    """
+    Main function to execute the pipeline.
+    """
+    try:
+        spark = create_spark_session()
+        inventory_snapshots, supplier_catalog = load_data(spark)
+        joined_data = join_data(inventory_snapshots, supplier_catalog)
+        filtered_data = filter_inactive_products(joined_data)
+        reorder_flag_data = calculate_reorder_flag(filtered_data)
+        aggregated_data = aggregate_inventory_value(reorder_flag_data)
+        write_data(aggregated_data)
+    except Exception as e:
+        logger.error(f'Pipeline execution failed: {e}')
+        raise
 
 
 if __name__ == '__main__':
