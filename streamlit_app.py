@@ -287,11 +287,10 @@ with tab1:
 
             with st.spinner("🔄 Submitting user story and orchestrating agents..."):
                 try:
-                    # Use demo endpoint for testing (change to /pipelines/create for production)
                     response = requests.post(
-                        f"{api_url}/pipelines/demo",
+                        f"{api_url}/pipelines/create",
                         json=payload,
-                        timeout=300  # 5 minute timeout
+                        timeout=600  # 10 minute timeout for real agent execution
                     )
                     
                     if response.status_code in [200, 201]:
