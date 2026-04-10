@@ -4,7 +4,7 @@ The Task Agent is responsible for parsing user stories and extracting
 transformation intent into structured requirements.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 # Using plain str instead of Enum so the LLM can use any reasonable
