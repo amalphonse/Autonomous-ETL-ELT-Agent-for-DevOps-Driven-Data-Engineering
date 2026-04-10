@@ -4,41 +4,13 @@ The Task Agent is responsible for parsing user stories and extracting
 transformation intent into structured requirements.
 """
 
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
-from enum import Enum
 
-
-class TransformationType(str, Enum):
-    """Types of data transformations supported."""
-
-    FILTER = "filter"
-    JOIN = "join"
-    AGGREGATE = "aggregate"
-    WINDOW = "window"
-    UNION = "union"
-    GROUP_BY = "group_by"
-    PIVOT = "pivot"
-    FLATTEN = "flatten"
-    DEDUP = "dedup"
-    RANK = "rank"
-    SORT = "sort"
-    CUSTOM = "custom"
-
-
-class DataType(str, Enum):
-    """Supported data types for schema definition."""
-
-    STRING = "string"
-    INTEGER = "integer"
-    FLOAT = "float"
-    DOUBLE = "double"
-    BOOLEAN = "boolean"
-    DATE = "date"
-    TIMESTAMP = "timestamp"
-    ARRAY = "array"
-    STRUCT = "struct"
-    DECIMAL = "decimal"
+# Using plain str instead of Enum so the LLM can use any reasonable
+# transformation or type name without validation errors.
+TransformationType = str
+DataType = str
 
 
 class ColumnDefinition(BaseModel):
@@ -55,8 +27,8 @@ class DataSource(BaseModel):
 
     name: str = Field(..., description="Name/identifier of the data source")
     location: str = Field(..., description="Path or connection string to the data source")
-    format: Literal["csv", "parquet", "json", "delta", "sql"] = Field(
-        ..., description="Format of the data source"
+    format: str = Field(
+        ..., description="Format of the data source (e.g. csv, parquet, json, delta, sql, kafka)"
     )
     schema: List[ColumnDefinition] = Field(
         ..., description="Schema definition for the data source"
