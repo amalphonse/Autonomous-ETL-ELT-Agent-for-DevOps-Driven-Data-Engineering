@@ -148,7 +148,7 @@ Return a valid JSON object with the following structure:
   "transformation_steps": [
     {{
       "step_id": "step-1",
-      "transformation_type": "filter|join|aggregate|window|union|group_by|pivot|flatten|dedup|custom",
+      "transformation_type": "filter|join|aggregate|window|union|group_by|pivot|flatten|dedup|rank|sort|custom",
       "description": "what-this-step-does",
       "inputs": ["input-column-names"],
       "outputs": ["output-column-names"],

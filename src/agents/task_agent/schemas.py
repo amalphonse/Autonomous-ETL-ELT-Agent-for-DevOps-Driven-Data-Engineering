@@ -21,6 +21,8 @@ class TransformationType(str, Enum):
     PIVOT = "pivot"
     FLATTEN = "flatten"
     DEDUP = "dedup"
+    RANK = "rank"
+    SORT = "sort"
     CUSTOM = "custom"
 
 
