@@ -306,12 +306,14 @@ with tab1:
                         
                         summary_cols = st.columns(5)
                         
+                        overall_q = result.get('overall_quality', result.get('overall_quality_score', 0)) * 100
+                        duration = result.get('duration_seconds', result.get('execution_duration_seconds', 0))
                         metrics = [
                             ("Execution ID", result.get("execution_id", "N/A")[:8] + "..."),
                             ("Status", result.get("status", "Unknown")),
-                            ("Quality Score", f"{result.get('overall_quality_score', 0):.2f}/100"),
-                            ("Duration", f"{result.get('execution_duration_seconds', 0):.2f}s"),
-                            ("Timestamp", result.get("created_at", "N/A")[:19])
+                            ("Quality Score", f"{overall_q:.1f}/100"),
+                            ("Duration", f"{duration:.1f}s"),
+                            ("Task Confidence", f"{result.get('task_confidence', 0)*100:.0f}%")
                         ]
                         
                         for col, (label, value) in zip(summary_cols, metrics):
@@ -331,75 +333,83 @@ with tab1:
                         
                         with agent_tabs[0]:  # Task Agent
                             st.subheader("Task Analysis")
-                            if "task_agent_output" in result:
-                                task_output = result["task_agent_output"]
+                            task_output = result.get("task_agent_output") or result.get("parsed_requirements")
+                            if task_output:
                                 if isinstance(task_output, dict):
                                     st.json(task_output)
                                 else:
-                                    st.code(task_output)
+                                    st.code(str(task_output))
                             else:
-                                st.info("No task analysis available")
+                                # Show quality scores as fallback
+                                st.metric("Task Confidence", f"{result.get('task_confidence', 0)*100:.0f}%")
+                                st.info("Detailed task analysis not returned. Check Pipeline History for full details.")
                         
                         with agent_tabs[1]:  # Coding Agent
                             st.subheader("Generated PySpark Code")
-                            if "coding_agent_output" in result:
-                                code_output = result["coding_agent_output"]
+                            code_output = result.get("coding_agent_output") or result.get("generated_code")
+                            if code_output:
                                 if isinstance(code_output, dict):
-                                    generated_code = code_output.get("generated_code", "")
+                                    generated_code = code_output.get("pipeline_code") or code_output.get("generated_code", "")
                                     st.code(generated_code, language="python")
-                                    
                                     if "pydantic_models" in code_output:
                                         with st.expander("📋 Pydantic Models"):
                                             st.code(code_output["pydantic_models"], language="python")
                                 else:
-                                    st.code(code_output, language="python")
+                                    st.code(str(code_output), language="python")
                             else:
-                                st.info("No generated code available")
+                                st.metric("Code Quality", f"{result.get('code_quality', 0)*100:.0f}%")
+                                st.info("Generated code stored on GitHub — check the PR for the full source.")
                         
                         with agent_tabs[2]:  # Test Agent
                             st.subheader("Generated Test Suite")
-                            if "test_agent_output" in result:
-                                test_output = result["test_agent_output"]
+                            test_output = result.get("test_agent_output") or result.get("generated_tests")
+                            if test_output:
                                 if isinstance(test_output, dict):
-                                    test_code = test_output.get("generated_tests", "")
+                                    test_code = test_output.get("test_code") or test_output.get("generated_tests", "")
                                     st.code(test_code, language="python")
-                                    
                                     test_results = test_output.get("test_results", {})
                                     if test_results:
                                         with st.expander("✅ Test Results"):
                                             st.json(test_results)
                                 else:
-                                    st.code(test_output, language="python")
+                                    st.code(str(test_output), language="python")
                             else:
-                                st.info("No test suite available")
+                                st.metric("Test Quality", f"{result.get('test_quality', 0)*100:.0f}%")
+                                st.info("Test suite stored on GitHub — check the PR for the full source.")
                         
                         with agent_tabs[3]:  # Execution Agent
                             st.subheader("Execution Results")
-                            if "execution_agent_output" in result:
-                                exec_output = result["execution_agent_output"]
+                            exec_output = result.get("execution_agent_output") or result.get("execution_result")
+                            if exec_output:
                                 if isinstance(exec_output, dict):
                                     st.json(exec_output)
                                 else:
                                     st.code(str(exec_output))
                             else:
-                                st.info("No execution results available")
+                                log = result.get("execution_log", [])
+                                if log:
+                                    for entry in log:
+                                        st.write(entry)
+                                else:
+                                    st.info("No execution results (PySpark not available in serverless environment)")
                         
                         with agent_tabs[4]:  # PR Agent
                             st.subheader("Pull Request Details")
-                            if "pr_agent_output" in result:
-                                pr_output = result["pr_agent_output"]
+                            pr_output = result.get("pr_agent_output") or result.get("pull_request")
+                            if pr_output:
                                 if isinstance(pr_output, dict):
-                                    pr_url = pr_output.get("pr_url")
-                                    pr_number = pr_output.get("pr_number")
-                                    
+                                    pr_url = pr_output.get("pr_url") or pr_output.get("html_url")
+                                    pr_number = pr_output.get("pr_number") or pr_output.get("number")
                                     if pr_url:
-                                        st.info(f"🔗 [View Pull Request on GitHub]({pr_url})")
-                                    
-                                    st.json(pr_output)
+                                        st.success(f"✅ Pull Request #{pr_number} created!")
+                                        st.markdown(f"### 🔗 [View PR #{pr_number} on GitHub]({pr_url})")
+                                    with st.expander("PR Details (JSON)"):
+                                        st.json(pr_output)
                                 else:
-                                    st.text(pr_output)
+                                    st.text(str(pr_output))
                             else:
-                                st.info("No PR details available")
+                                st.metric("PR Quality", f"{result.get('pr_quality', 0)*100:.0f}%")
+                                st.info("PR created on GitHub — see the link above or visit the GitHub repo.")
                         
                     else:
                         st.error(f"❌ Error: {response.status_code}")

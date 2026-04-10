@@ -203,6 +203,7 @@ class PipelineResponse(BaseModel):
 class PipelineDetailsResponse(PipelineResponse):
     """Detailed pipeline response with generated artifacts."""
 
+    duration_seconds: Optional[float] = None
     parsed_requirements: Optional[dict] = None
     generated_code: Optional[dict] = None
     generated_tests: Optional[dict] = None
@@ -505,7 +506,7 @@ async def create_pipeline(
             f"Pipeline {execution_id} completed with status: {final_state['status']} in {duration_seconds:.2f}s"
         )
 
-        return PipelineResponse(
+        return PipelineDetailsResponse(
             execution_id=execution_id,
             status=final_state["status"],
             message=f"Pipeline creation {'completed successfully' if final_state['status'] == 'success' else 'failed'}",
@@ -516,6 +517,11 @@ async def create_pipeline(
             overall_quality=summary["overall_score"],
             execution_log=summary["execution_log"],
             error=summary.get("error"),
+            duration_seconds=duration_seconds,
+            parsed_requirements=final_state.get("parsed_requirements"),
+            generated_code=final_state.get("generated_code"),
+            generated_tests=final_state.get("generated_tests"),
+            pull_request=final_state.get("pull_request"),
         )
 
     except Exception as e:
