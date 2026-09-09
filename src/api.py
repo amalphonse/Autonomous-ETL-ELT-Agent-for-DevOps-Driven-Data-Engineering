@@ -194,6 +194,7 @@ class PipelineResponse(BaseModel):
     task_confidence: float
     code_quality: float
     test_quality: float
+    orchestration_quality: float
     pr_quality: float
     overall_quality: float
     execution_log: list
@@ -207,6 +208,7 @@ class PipelineDetailsResponse(PipelineResponse):
     parsed_requirements: Optional[dict] = None
     generated_code: Optional[dict] = None
     generated_tests: Optional[dict] = None
+    generated_orchestration: Optional[dict] = None
     pull_request: Optional[dict] = None
 
 
@@ -490,6 +492,7 @@ async def create_pipeline(
             task_confidence=summary["task_confidence"],
             code_quality=summary["code_quality"],
             test_quality=summary["test_quality"],
+            orchestration_quality=summary.get("orchestration_quality", 0.0),
             pr_quality=summary["pr_quality"],
             overall_quality=summary["overall_score"],
             execution_log=summary["execution_log"],
@@ -497,6 +500,7 @@ async def create_pipeline(
             parsed_requirements=final_state.get("parsed_requirements"),
             generated_code=final_state.get("generated_code"),
             generated_tests=final_state.get("generated_tests"),
+            generated_orchestration=final_state.get("generated_orchestration"),
             pull_request=final_state.get("pull_request"),
             duration_seconds=duration_seconds,
         )
@@ -513,6 +517,7 @@ async def create_pipeline(
             task_confidence=summary["task_confidence"],
             code_quality=summary["code_quality"],
             test_quality=summary["test_quality"],
+            orchestration_quality=summary.get("orchestration_quality", 0.0),
             pr_quality=summary["pr_quality"],
             overall_quality=summary["overall_score"],
             execution_log=summary["execution_log"],
@@ -521,6 +526,7 @@ async def create_pipeline(
             parsed_requirements=final_state.get("parsed_requirements"),
             generated_code=final_state.get("generated_code"),
             generated_tests=final_state.get("generated_tests"),
+            generated_orchestration=final_state.get("generated_orchestration"),
             pull_request=final_state.get("pull_request"),
         )
 
@@ -575,6 +581,7 @@ async def get_pipeline(
         task_confidence=execution.task_confidence,
         code_quality=execution.code_quality,
         test_quality=execution.test_quality,
+        orchestration_quality=execution.orchestration_quality,
         pr_quality=execution.pr_quality,
         overall_quality=execution.overall_quality,
         execution_log=execution.execution_log or [],
@@ -582,6 +589,7 @@ async def get_pipeline(
         parsed_requirements=execution.parsed_requirements,
         generated_code=execution.generated_code,
         generated_tests=execution.generated_tests,
+        generated_orchestration=execution.generated_orchestration,
         pull_request=execution.pull_request,
     )
 

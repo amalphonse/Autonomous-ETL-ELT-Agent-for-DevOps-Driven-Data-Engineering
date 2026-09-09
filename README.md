@@ -17,9 +17,10 @@ This system minimizes manual effort in the DE lifecycle by using **Agentic AI** 
 * **Automated Spark Generation:** Produces modular PySpark code using Delta Lake patterns.
 * **Autonomous Validation:** Auto-generates `pytest` suites including null-checks and schema assertions.
 * **Code Execution:** Safely executes generated PySpark code with error recovery and metrics capture.
+* **Airflow DAG Generation:** Automatically creates production-ready Airflow DAGs with task dependencies, scheduling, and deployment notes for Dataproc, Databricks, EMR, or Synapse environments.
 * **Data Lineage Tracking:** Extracts and visualizes data flows with OpenLineage protocol compliance for full data governance.
 * **Persistent Storage:** SQLite database tracks all executions with full audit trail and analytics.
-* **Git Automation:** Creates branches, commits code, and raises Pull Requests via GitHub API (PyGithub).
+* **Git Automation:** Creates branches, commits code/tests/DAGs, and raises Pull Requests via GitHub API (PyGithub).
 * **REST API:** FastAPI endpoints for pipeline creation, querying, analytics, and lineage visualization.
 * **Streamlit Dashboard:** Interactive UI for story submission, execution history, and analytics.
 
@@ -30,7 +31,8 @@ The project utilizes a **Multi-Agent Orchestration** pattern powered by **LangGr
 2. **Coding Agent:** PySpark & Pydantic model generation.
 3. **Test Agent:** Unit testing & business logic validation.
 4. **Execution Agent:** Code execution with safety sandboxing and metrics capture.
-5. **PR Agent:** Repository operations & documentation.
+5. **Orchestration Agent:** Airflow DAG generation & workflow scheduling.
+6. **PR Agent:** Repository operations & documentation.
 
 ### Orchestration Flow
 
@@ -40,13 +42,15 @@ graph LR
     B --> |"Parsed Intent<br/>& Schema"| C["Coding Agent<br/>PySpark Generation"]
     C --> |"Generated Code<br/>& Models"| D["Test Agent<br/>Unit Testing"]
     D --> |"Validated Code<br/>& Tests"| E["Execution Agent<br/>Code Execution"]
-    E --> |"Execution Results<br/>& Metrics"| F["PR Agent<br/>Git Operations"]
-    F --> |"Create Branch<br/>Commit & Push"| G["🔗 Pull Request<br/>(GitHub)"]
+    E --> |"Execution Results<br/>& Metrics"| F["Orchestration Agent<br/>Airflow DAG Generation"]
+    F --> |"DAG Files<br/>& Deployment Notes"| G["PR Agent<br/>Git Operations"]
+    G --> |"Create Branch<br/>Commit & Push"| H["🔗 Pull Request<br/>(GitHub)"]
     
-    C -.->|"Pydantic Models"| H["Schema Validation"]
-    D -.->|"Pytest Suites"| H
-    C -.->|"Delta Lake<br/>Patterns"| I["Data Processing"]
-    E -.->|"Execution Log<br/>& Metrics"| J["Database<br/>(SQLite)"]
+    C -.->|"Pydantic Models"| I["Schema Validation"]
+    D -.->|"Pytest Suites"| I
+    C -.->|"Delta Lake<br/>Patterns"| J["Data Processing"]
+    E -.->|"Execution Log<br/>& Metrics"| K["Database<br/>(SQLite)"]
+    F -.->|"Airflow DAG<br/>& Schedule"| L["Workflow Orchestration"]
 ```
 
 ### System Integration
@@ -62,7 +66,8 @@ graph TB
         C["Coding Agent"]
         D["Test Agent"]
         E["Execution Agent"]
-        F["PR Agent"]
+        F["Orchestration Agent"]
+        G["PR Agent"]
     end
     
     subgraph AI["AI Engine"]
@@ -112,7 +117,8 @@ graph TB
 - **Coding Agent:** Generates modular PySpark code using Delta Lake patterns and produces Pydantic models for schema definition
 - **Test Agent:** Auto-generates pytest suites including null-checks, schema assertions, and business logic validation
 - **Execution Agent:** Safely executes generated PySpark code via SparkExecutor or LocalExecutor with error recovery; captures metrics and logs
-- **PR Agent:** Handles Git operations—creates branches, commits code with descriptions, and raises Pull Requests via GitHub API
+- **Orchestration Agent:** Generates production-ready Airflow DAGs with task dependencies, scheduling configuration, and deployment documentation for Dataproc, Databricks, EMR, or Synapse
+- **PR Agent:** Handles Git operations—creates branches, commits code/tests/DAGs with descriptions, and raises Pull Requests via GitHub API
 
 **Data Flow & Dependencies**
 - Task Agent runs first, producing structured intent that flows to Coding Agent

@@ -33,6 +33,7 @@ class PipelineExecution(Base):
     task_confidence = Column(Float, default=0.0)
     code_quality = Column(Float, default=0.0)
     test_quality = Column(Float, default=0.0)
+    orchestration_quality = Column(Float, default=0.0)
     pr_quality = Column(Float, default=0.0)
     overall_quality = Column(Float, default=0.0)
 
@@ -40,6 +41,7 @@ class PipelineExecution(Base):
     parsed_requirements = Column(JSON, nullable=True)
     generated_code = Column(JSON, nullable=True)
     generated_tests = Column(JSON, nullable=True)
+    generated_orchestration = Column(JSON, nullable=True)
     pull_request = Column(JSON, nullable=True)
 
     # Execution result and lineage
@@ -64,6 +66,7 @@ class PipelineExecution(Base):
             "task_confidence": self.task_confidence,
             "code_quality": self.code_quality,
             "test_quality": self.test_quality,
+            "orchestration_quality": self.orchestration_quality,
             "pr_quality": self.pr_quality,
             "overall_quality": self.overall_quality,
             "error_message": self.error_message,

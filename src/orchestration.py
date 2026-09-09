@@ -11,6 +11,7 @@ import uuid
 from src.agents.task_agent import TaskAgent, UserStory, ParsedRequirements
 from src.agents.coding_agent import CodingAgent, GeneratedCode
 from src.agents.test_agent import TestAgent, GeneratedTests
+from src.agents.orchestration_agent import OrchestrationAgent
 from src.agents.pr_agent import PRAgent, GeneratedPullRequest
 from src.execution import ExecutionAgent
 from src.types import AgentStatus
@@ -37,10 +38,14 @@ class OrchestrationState(TypedDict):
     test_quality_score: float = 0.0
     coverage_metrics: Optional[dict] = None
 
-    # Execution Agent output (NEW)
+    # Execution Agent output
     execution_result: Optional[dict] = None
     execution_quality_score: float = 0.0
     execution_status: str = "not_executed"
+
+    # Orchestration Agent output
+    generated_orchestration: Optional[dict] = None
+    orchestration_quality_score: float = 0.0
 
     # PR Agent output
     pull_request: Optional[dict] = None
@@ -56,15 +61,17 @@ class AgentOrchestrator:
     """Master orchestrator for the multi-agent system.
 
     Coordinates the execution of all agents in sequence:
-    1. Task Agent - Parse requirements
-    2. Coding Agent - Generate code
-    3. Test Agent - Create tests
-    4. Execution Agent - Run generated code
-    5. PR Agent - Prepare Pull Request
+    1. Orchestration Agent - Generate Airflow DAGs
+    6. PR Agent - Prepare Pull Request
     """
 
     def __init__(self):
         """Initialize the orchestrator with all agents."""
+        self.task_agent = TaskAgent()
+        self.coding_agent = CodingAgent()
+        self.test_agent = TestAgent()
+        self.execution_agent = ExecutionAgent(use_local_executor=True)
+        self.orchestration_agent = OrchestrationAgent(
         self.task_agent = TaskAgent()
         self.coding_agent = CodingAgent()
         self.test_agent = TestAgent()
@@ -138,7 +145,13 @@ class AgentOrchestrator:
             initial_state = await self._run_execution_agent(initial_state)
             if initial_state.get("error"):
                 initial_state["status"] = "failed"
+                returnOrchestration Agent (generate Airflow DAG)
+            initial_state = await self._run_orchestration_agent(initial_state)
+            if initial_state.get("error"):
+                initial_state["status"] = "failed"
                 return initial_state
+
+            # Execute  initial_state
 
             # Execute PR Agent
             initial_state = await self._run_pr_agent(initial_state)
@@ -326,7 +339,65 @@ class AgentOrchestrator:
 
         except Exception as e:
             logger.error(f"Execution Agent error: {str(e)}")
-            state["execution_status"] = "error"
+            state["orchestration_agent(
+        self, state: OrchestrationState
+    ) -> OrchestrationState:
+        """Run Orchestration Agent - Generate Airflow DAG.
+
+        Args:
+            state: Current orchestration state.
+
+        Returns:
+            Updated state with Orchestration Agent output.
+        """
+        logger.info("Executing Orchestration Agent")
+
+        if not state.get("generated_code") or not state.get("parsed_requirements"):
+            state["error"] = "Generated code or requirements missing"
+            return state
+
+        try:
+            # Extract story info
+            requirements = state.get("parsed_requirements", {})
+            user_story = state.get("user_story", {})
+            
+            # Prepare input for Orchestration Agent
+            orchestration_input = {
+                "story_title": requirements.get("title", "ETL Pipeline"),
+                "story_description": requirements.get("description", ""),
+                "parsed_requirements": requirements,
+                "generated_code": state["generated_code"],
+                "schedule_requirements": requirements.get("schedule_requirements"),
+                "execution_environment": requirements.get("execution_environment", "dataproc"),
+            }
+
+            # Execute Orchestration Agent
+            output = await self.orchestration_agent.execute(orchestration_input)
+
+            if output.status == AgentStatus.SUCCESS:
+                state["generated_orchestration"] = output.data.get(
+                    "generated_orchestration"
+                )
+                state["orchestration_quality_score"] = output.data.get(
+                    "quality_score", 0.0
+                )
+                state["execution_log"].append(
+                    "✅ Orchestration Agent: Airflow DAG generated successfully"
+                )
+                logger.info(
+                    f"Orchestration Agent quality score: {state['orchestration_quality_score']:.2%}"
+                )
+            else:
+                raise Exception(f"Orchestration Agent failed: {output.error}")
+
+        except Exception as e:
+            logger.error(f"Orchestration Agent error: {str(e)}")
+            state["error"] = str(e)
+            state["status"] = "failed"
+
+        return state
+
+    async def _run_execution_status"] = "error"
             state["execution_quality_score"] = 0.0
             state["execution_log"].append(
                 "⚠️ Execution Agent: Execution error (continuing pipeline)"
@@ -367,6 +438,20 @@ class AgentOrchestrator:
                     if "main_pipeline_code" in code_data:
                         code_files["src/pipeline.py"] = code_data["main_pipeline_code"]
 
+            # Extract orchestration DAG file if available
+            if state.get("generated_orchestration"):
+                orchestration_data = state["generated_orchestration"]
+                if isinstance(orchestration_data, dict):
+                    dag_file_path = orchestration_data.get("dag_file_path", "dags/pipeline_dag.py")
+                    dag_code = orchestration_data.get("dag_code", "")
+                    if dag_code:
+                        code_files[dag_file_path] = dag_code
+                    
+                    # Add deployment notes as README
+                    deployment_notes = orchestration_data.get("deployment_notes", "")
+                    if deployment_notes:
+                        code_files["dags/README_DEPLOYMENT.md"] = deployment_notes
+
             # Get story info from parsed requirements
             requirements = state.get("parsed_requirements", {})
 
@@ -382,6 +467,7 @@ class AgentOrchestrator:
                 "story_description": requirements.get("description", ""),
                 "code_quality_score": state["code_quality_score"],
                 "test_quality_score": state["test_quality_score"],
+                "orchestration_quality_score": state.get("orchestration_quality_score", 0.0),
                 "repository": {
                     "owner": _settings.github_repo_owner or "amalphonse",
                     "repo_name": _settings.github_repo_name or "Autonomous-ETL-ELT-Agent-for-DevOps-Driven-Data-Engineering",
@@ -421,17 +507,19 @@ class AgentOrchestrator:
         # Calculate overall quality - average of all agent quality scores
         code_quality = state.get("code_quality_score", 0.0)
         test_quality = state.get("test_quality_score", 0.0)
+        orchestration_quality = state.get("orchestration_quality_score", 0.0)
         pr_quality = state.get("pr_quality_score", 0.0)
         execution_quality = state.get("execution_quality_score", 0.5)  # Default 0.5 if not executed
         
-        # Average quality across all agents (5 agents: task, coding, test, execution, pr)
+        # Average quality across all agents (6 agents: task, coding, test, execution, orchestration, pr)
         overall_score = (
             state.get("task_confidence", 0.0)
             + code_quality
             + test_quality
             + execution_quality
+            + orchestration_quality
             + pr_quality
-        ) / 5
+        ) / 6
         
         return {
             "status": state["status"],
@@ -440,6 +528,7 @@ class AgentOrchestrator:
             "test_quality": test_quality,
             "execution_quality": execution_quality,
             "execution_status": state.get("execution_status", "not_executed"),
+            "orchestration_quality": orchestration_quality,
             "pr_quality": pr_quality,
             "overall_score": overall_score,
             "execution_log": state.get("execution_log", []),

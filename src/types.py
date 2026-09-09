@@ -12,6 +12,7 @@ class AgentType(str, Enum):
     TASK = "task"
     CODING = "coding"
     TEST = "test"
+    ORCHESTRATION = "orchestration"
     PR = "pr"
 
 
@@ -53,6 +54,15 @@ class Agent(ABC):
             agent_type: Type of agent being initialized.
         """
         self.agent_type = agent_type
+        self.status = AgentStatus.PENDING
+    
+    def set_status(self, status: AgentStatus):
+        """Set the agent status.
+        
+        Args:
+            status: New status for the agent.
+        """
+        self.status = status
 
     @abstractmethod
     async def execute(self, agent_input: AgentInput) -> AgentOutput:
