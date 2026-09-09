@@ -339,7 +339,12 @@ class AgentOrchestrator:
 
         except Exception as e:
             logger.error(f"Execution Agent error: {str(e)}")
-            state["orchestration_agent(
+            state["execution_status"] = "error"
+            state["execution_quality_score"] = 0.0
+
+        return state
+
+    def _run_orchestration_agent(
         self, state: OrchestrationState
     ) -> OrchestrationState:
         """Run Orchestration Agent - Generate Airflow DAG.

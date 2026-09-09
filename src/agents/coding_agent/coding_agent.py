@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -17,6 +17,11 @@ from src.agents.coding_agent.schemas import (
     PydanticModel,
     CodeFile,
     CodeConfiguration,
+    OptimizationAnalysis,
+    PartitioningRecommendation,
+    CachingRecommendation,
+    JoinOptimization,
+    OptimizationRule,
 )
 
 logger = logging.getLogger(__name__)
@@ -202,10 +207,22 @@ Return ONLY the Python code as a string, no markdown wrapping."""
                 coding_input.requirements, generated_code
             )
 
-            # Step 5: Create output
+            # Step 5: Analyze optimizations
+            logger.debug("Analyzing pipeline optimizations...")
+            optimization_analysis = self._analyze_optimizations(
+                coding_input.requirements, generated_code
+            )
+
+            # Step 6: Add optimization comments to code
+            optimized_code = self._add_optimization_comments(
+                generated_code, optimization_analysis
+            )
+
+            # Step 7: Create output
             coding_output = CodingAgentOutput(
-                generated_code=generated_code,
+                generated_code=optimized_code,
                 code_quality_score=quality_score,
+                optimization_analysis=optimization_analysis,
                 generation_notes=None,
                 raw_generation=pipeline_response,
             )
@@ -423,6 +440,392 @@ Return ONLY the Python code as a string, no markdown wrapping."""
 
         # Cap at 1.0
         return min(score, 1.0)
+
+    def _analyze_optimizations(
+        self, requirements: ParsedRequirements, generated_code: GeneratedCode
+    ) -> OptimizationAnalysis:
+        """Analyze code for optimization opportunities.
+
+        Args:
+            requirements: Original requirements.
+            generated_code: Generated code to analyze.
+
+        Returns:
+            OptimizationAnalysis with recommendations.
+        """
+        partitioning_recs = self._recommend_partitioning(requirements)
+        caching_recs = self._recommend_caching(requirements, generated_code)
+        join_opts = self._optimize_joins(requirements)
+        general_rules = self._generate_optimization_rules(requirements, generated_code)
+
+        # Calculate overall optimization score
+        base_score = 0.6
+        if partitioning_recs:
+            base_score += 0.1
+        if caching_recs:
+            base_score += 0.1
+        if join_opts:
+            base_score += 0.15
+        if len(general_rules) >= 3:
+            base_score += 0.05
+
+        # Estimate cost reduction
+        cost_reduction = self._estimate_cost_reduction(
+            partitioning_recs, caching_recs, join_opts
+        )
+
+        return OptimizationAnalysis(
+            overall_score=min(base_score, 1.0),
+            partitioning_recommendations=partitioning_recs,
+            caching_recommendations=caching_recs,
+            join_optimizations=join_opts,
+            optimization_rules=general_rules,
+            estimated_cost_reduction=cost_reduction,
+            notes="Apply these optimizations based on your data volume and cluster size.",
+        )
+
+    def _recommend_partitioning(
+        self, requirements: ParsedRequirements
+    ) -> List[PartitioningRecommendation]:
+        """Generate partitioning recommendations.
+
+        Args:
+            requirements: Parsed requirements.
+
+        Returns:
+            List of partitioning recommendations.
+        """
+        recommendations = []
+
+        # Check for date/time columns in sources
+        for source in requirements.input_sources:
+            date_columns = [
+                col.name
+                for col in source.schema
+                if "date" in col.data_type.lower() or "timestamp" in col.data_type.lower()
+            ]
+            if date_columns:
+                recommendations.append(
+                    PartitioningRecommendation(
+                        columns=date_columns[:2],  # Max 2 partition columns
+                        reason=f"Source '{source.name}' contains temporal data, partitioning by date improves query performance",
+                        estimated_benefit="30-60% faster queries with date filters",
+                        partition_type="range",
+                        num_partitions=None,
+                    )
+                )
+
+        # Check for high-cardinality grouping columns
+        for step in requirements.transformation_steps:
+            if step.transformation_type.lower() in ["aggregate", "group_by", "groupby"]:
+                group_cols = step.parameters.get("group_by_columns", [])
+                if group_cols:
+                    recommendations.append(
+                        PartitioningRecommendation(
+                            columns=group_cols[:2],
+                            reason=f"Aggregation on {', '.join(group_cols)} benefits from hash partitioning",
+                            estimated_benefit="20-40% faster aggregations, reduced shuffle",
+                            partition_type="hash",
+                            num_partitions=200,
+                        )
+                    )
+                break  # One recommendation is enough
+
+        return recommendations
+
+    def _recommend_caching(
+        self, requirements: ParsedRequirements, generated_code: GeneratedCode
+    ) -> List[CachingRecommendation]:
+        """Generate caching recommendations.
+
+        Args:
+            requirements: Parsed requirements.
+            generated_code: Generated code.
+
+        Returns:
+            List of caching recommendations.
+        """
+        recommendations = []
+        code_text = generated_code.main_pipeline_code.lower()
+
+        # Check for multiple joins (reused intermediate results)
+        join_count = code_text.count(".join(")
+        if join_count >= 2:
+            recommendations.append(
+                CachingRecommendation(
+                    dataframe_name="joined_data or intermediate_df",
+                    reason="Multiple joins detected - cache intermediate results to avoid recomputation",
+                    storage_level="MEMORY_AND_DISK",
+                    estimated_reuse_count=join_count,
+                )
+            )
+
+        # Check for multiple aggregations
+        agg_count = code_text.count(".agg(") + code_text.count(".groupby(")
+        if agg_count >= 2:
+            recommendations.append(
+                CachingRecommendation(
+                    dataframe_name="aggregated_data",
+                    reason="Multiple aggregations detected - cache base aggregation to avoid recomputation",
+                    storage_level="MEMORY_AND_DISK",
+                    estimated_reuse_count=agg_count,
+                )
+            )
+
+        # Check for dimension tables (small lookup tables)
+        for source in requirements.input_sources:
+            if "dim" in source.name.lower() or "lookup" in source.name.lower():
+                recommendations.append(
+                    CachingRecommendation(
+                        dataframe_name=f"{source.name}_df",
+                        reason=f"Dimension table '{source.name}' is small and frequently joined - cache in memory",
+                        storage_level="MEMORY_ONLY",
+                        estimated_reuse_count=3,
+                    )
+                )
+
+        return recommendations
+
+    def _optimize_joins(
+        self, requirements: ParsedRequirements
+    ) -> List[JoinOptimization]:
+        """Generate join optimization recommendations.
+
+        Args:
+            requirements: Parsed requirements.
+
+        Returns:
+            List of join optimizations.
+        """
+        optimizations = []
+
+        for step in requirements.transformation_steps:
+            if step.transformation_type.lower() == "join":
+                join_type = step.parameters.get("join_type", "inner")
+                left_source = step.inputs[0] if len(step.inputs) > 0 else "unknown"
+                right_source = step.inputs[1] if len(step.inputs) > 1 else "unknown"
+
+                # Check if it's a dimension table join (broadcast candidate)
+                if (
+                    "dim" in right_source.lower()
+                    or "lookup" in right_source.lower()
+                    or "small" in right_source.lower()
+                ):
+                    optimizations.append(
+                        JoinOptimization(
+                            join_description=f"{join_type} join between {left_source} and {right_source}",
+                            optimization_type="broadcast",
+                            reason=f"'{right_source}' appears to be a dimension/lookup table - use broadcast join",
+                            estimated_data_size="< 10MB for dimension table",
+                            broadcast_threshold="10MB",
+                        )
+                    )
+                else:
+                    # Large table join - use sort-merge
+                    optimizations.append(
+                        JoinOptimization(
+                            join_description=f"{join_type} join between {left_source} and {right_source}",
+                            optimization_type="sort_merge",
+                            reason="Large table join - use sort-merge join with proper partitioning",
+                            estimated_data_size="> 100MB",
+                            broadcast_threshold=None,
+                        )
+                    )
+
+        return optimizations
+
+    def _generate_optimization_rules(
+        self, requirements: ParsedRequirements, generated_code: GeneratedCode
+    ) -> List[OptimizationRule]:
+        """Generate general optimization rules.
+
+        Args:
+            requirements: Parsed requirements.
+            generated_code: Generated code.
+
+        Returns:
+            List of optimization rules.
+        """
+        rules = []
+        code_text = generated_code.main_pipeline_code.lower()
+
+        # Filter pushdown
+        if ".filter(" in code_text or ".where(" in code_text:
+            rules.append(
+                OptimizationRule(
+                    rule_id="opt-001",
+                    category="filter_pushdown",
+                    priority="high",
+                    title="Apply filters early",
+                    description="Move filter operations as early as possible in the pipeline to reduce data volume",
+                    code_location="After data read operations",
+                    estimated_impact="40-70% reduction in data processed",
+                )
+            )
+
+        # Column pruning
+        if ".select(" in code_text:
+            rules.append(
+                OptimizationRule(
+                    rule_id="opt-002",
+                    category="shuffle",
+                    priority="medium",
+                    title="Select only required columns",
+                    description="Use .select() to keep only necessary columns before expensive operations",
+                    code_location="Before joins and aggregations",
+                    estimated_impact="20-30% memory reduction",
+                )
+            )
+
+        # Repartitioning before shuffle operations
+        if ".join(" in code_text or ".groupby(" in code_text:
+            rules.append(
+                OptimizationRule(
+                    rule_id="opt-003",
+                    category="shuffle",
+                    priority="high",
+                    title="Repartition before shuffle operations",
+                    description="Use .repartition() on join keys before joins to optimize shuffle",
+                    code_location="Before join operations",
+                    estimated_impact="30-50% faster joins",
+                )
+            )
+
+        # Broadcast hint
+        if ".join(" in code_text:
+            rules.append(
+                OptimizationRule(
+                    rule_id="opt-004",
+                    category="broadcast",
+                    priority="high",
+                    title="Use broadcast joins for small tables",
+                    description="Use broadcast() hint for tables < 10MB to avoid shuffle",
+                    code_location="Join operations with dimension tables",
+                    estimated_impact="60-80% faster joins with small tables",
+                )
+            )
+
+        # Coalesce after filter
+        if ".filter(" in code_text or ".where(" in code_text:
+            rules.append(
+                OptimizationRule(
+                    rule_id="opt-005",
+                    category="spill",
+                    priority="medium",
+                    title="Coalesce after filtering",
+                    description="Use .coalesce() after aggressive filtering to reduce partition count",
+                    code_location="After filter operations that significantly reduce data",
+                    estimated_impact="15-25% faster downstream operations",
+                )
+            )
+
+        return rules
+
+    def _estimate_cost_reduction(
+        self,
+        partitioning_recs: List[PartitioningRecommendation],
+        caching_recs: List[CachingRecommendation],
+        join_opts: List[JoinOptimization],
+    ) -> str:
+        """Estimate overall cost reduction.
+
+        Args:
+            partitioning_recs: Partitioning recommendations.
+            caching_recs: Caching recommendations.
+            join_opts: Join optimizations.
+
+        Returns:
+            Cost reduction estimate string.
+        """
+        total_score = 0
+
+        if partitioning_recs:
+            total_score += len(partitioning_recs) * 15
+        if caching_recs:
+            total_score += len(caching_recs) * 10
+        if join_opts:
+            total_score += len(join_opts) * 20
+
+        if total_score >= 50:
+            return "40-60% reduction in compute costs"
+        elif total_score >= 30:
+            return "25-40% reduction in compute costs"
+        elif total_score >= 15:
+            return "15-25% reduction in compute costs"
+        else:
+            return "10-15% reduction in compute costs"
+
+    def _add_optimization_comments(
+        self, generated_code: GeneratedCode, optimization_analysis: OptimizationAnalysis
+    ) -> GeneratedCode:
+        """Add optimization hints as comments to generated code.
+
+        Args:
+            generated_code: Original generated code.
+            optimization_analysis: Optimization analysis.
+
+        Returns:
+            Updated GeneratedCode with optimization comments.
+        """
+        code = generated_code.main_pipeline_code
+
+        # Add optimization header comment
+        optimization_header = "\n".join([
+            "# ============================================",
+            "# PERFORMANCE OPTIMIZATION RECOMMENDATIONS",
+            "# ============================================",
+            f"# Overall Optimization Score: {optimization_analysis.overall_score:.2f}",
+            f"# Estimated Cost Reduction: {optimization_analysis.estimated_cost_reduction or 'N/A'}",
+            "#",
+        ])
+
+        # Add partitioning recommendations
+        if optimization_analysis.partitioning_recommendations:
+            optimization_header += "# PARTITIONING:\n"
+            for rec in optimization_analysis.partitioning_recommendations:
+                optimization_header += f"#   - Partition by {', '.join(rec.columns)} ({rec.partition_type})\n"
+                optimization_header += f"#     Reason: {rec.reason}\n"
+                optimization_header += f"#     Benefit: {rec.estimated_benefit}\n"
+            optimization_header += "#\n"
+
+        # Add caching recommendations
+        if optimization_analysis.caching_recommendations:
+            optimization_header += "# CACHING:\n"
+            for rec in optimization_analysis.caching_recommendations:
+                optimization_header += f"#   - Cache '{rec.dataframe_name}' ({rec.storage_level})\n"
+                optimization_header += f"#     Reason: {rec.reason}\n"
+            optimization_header += "#\n"
+
+        # Add join optimizations
+        if optimization_analysis.join_optimizations:
+            optimization_header += "# JOIN OPTIMIZATIONS:\n"
+            for opt in optimization_analysis.join_optimizations:
+                optimization_header += f"#   - {opt.join_description}\n"
+                optimization_header += f"#     Strategy: {opt.optimization_type}\n"
+                optimization_header += f"#     Reason: {opt.reason}\n"
+            optimization_header += "#\n"
+
+        # Add top priority rules
+        high_priority_rules = [
+            r for r in optimization_analysis.optimization_rules if r.priority == "high"
+        ]
+        if high_priority_rules:
+            optimization_header += "# HIGH PRIORITY OPTIMIZATIONS:\n"
+            for rule in high_priority_rules[:3]:  # Top 3
+                optimization_header += f"#   - {rule.title}\n"
+                optimization_header += f"#     {rule.description}\n"
+                optimization_header += f"#     Impact: {rule.estimated_impact}\n"
+            optimization_header += "#\n"
+
+        optimization_header += "# ============================================\n\n"
+
+        # Prepend to code
+        updated_code = optimization_header + code
+
+        # Update the generated code object
+        generated_code.main_pipeline_code = updated_code
+
+        return generated_code
 
     def _error_output(self, error_message: str) -> AgentOutput:
         """Create an error output.

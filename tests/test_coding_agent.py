@@ -5,6 +5,15 @@ import json
 from unittest.mock import patch, MagicMock
 
 from src.agents.coding_agent import CodingAgent, CodingAgentInput, CodingAgentOutput, CodeFile
+from src.agents.coding_agent.schemas import (
+    OptimizationAnalysis,
+    PartitioningRecommendation,
+    CachingRecommendation,
+    JoinOptimization,
+    OptimizationRule,
+    GeneratedCode,
+    PydanticModel,
+)
 from src.agents.task_agent.schemas import (
     ParsedRequirements,
     DataSource,
@@ -42,25 +51,25 @@ def sample_parsed_requirements():
                 schema=[
                     ColumnDefinition(
                         name="order_id",
-                        data_type=DataType.STRING,
+                        data_type="string",
                         nullable=False,
                         description="Order ID",
                     ),
                     ColumnDefinition(
                         name="customer_id",
-                        data_type=DataType.STRING,
+                        data_type="string",
                         nullable=False,
                         description="Customer ID",
                     ),
                     ColumnDefinition(
                         name="amount",
-                        data_type=DataType.DOUBLE,
+                        data_type="double",
                         nullable=False,
                         description="Order amount",
                     ),
                     ColumnDefinition(
                         name="order_date",
-                        data_type=DataType.DATE,
+                        data_type="date",
                         nullable=False,
                         description="Order date",
                     ),
@@ -74,13 +83,13 @@ def sample_parsed_requirements():
                 schema=[
                     ColumnDefinition(
                         name="customer_id",
-                        data_type=DataType.STRING,
+                        data_type="string",
                         nullable=False,
                         description="Customer ID",
                     ),
                     ColumnDefinition(
                         name="region",
-                        data_type=DataType.STRING,
+                        data_type="string",
                         nullable=False,
                         description="Customer region",
                     ),
@@ -91,19 +100,19 @@ def sample_parsed_requirements():
         output_schema=[
             ColumnDefinition(
                 name="region",
-                data_type=DataType.STRING,
+                data_type="string",
                 nullable=False,
                 description="Customer region",
             ),
             ColumnDefinition(
                 name="total_amount",
-                data_type=DataType.DOUBLE,
+                data_type="double",
                 nullable=False,
                 description="Total order amount",
             ),
             ColumnDefinition(
                 name="order_count",
-                data_type=DataType.INTEGER,
+                data_type="integer",
                 nullable=False,
                 description="Number of orders",
             ),
@@ -112,7 +121,7 @@ def sample_parsed_requirements():
         transformation_steps=[
             TransformationStep(
                 step_id="step1",
-                transformation_type=TransformationType.FILTER,
+                transformation_type="filter",
                 description="Filter orders from last 30 days with amount > 1000",
                 inputs=["orders"],
                 outputs=["filtered_orders"],
@@ -120,7 +129,7 @@ def sample_parsed_requirements():
             ),
             TransformationStep(
                 step_id="step2",
-                transformation_type=TransformationType.JOIN,
+                transformation_type="join",
                 description="Join with customer data",
                 inputs=["filtered_orders", "customers"],
                 outputs=["orders_with_region"],
@@ -128,7 +137,7 @@ def sample_parsed_requirements():
             ),
             TransformationStep(
                 step_id="step3",
-                transformation_type=TransformationType.AGGREGATE,
+                transformation_type="aggregate",
                 description="Group by region and sum amounts",
                 inputs=["orders_with_region"],
                 outputs=["result"],
@@ -439,3 +448,321 @@ class TestCodingAgentOutput:
 
             assert output.status == AgentStatus.FAILED
             assert "LLM error" in output.error
+
+class TestOptimizationAnalysis:
+    """Tests for pipeline optimization analysis."""
+
+    def test_partitioning_recommendations_for_date_columns(
+        self, coding_agent, sample_parsed_requirements
+    ):
+        """Test that partitioning recommendations are generated for date columns."""
+        recommendations = coding_agent._recommend_partitioning(sample_parsed_requirements)
+        
+        assert len(recommendations) > 0
+        date_rec = recommendations[0]
+        assert "order_date" in date_rec.columns
+        assert date_rec.partition_type == "range"
+        assert "temporal" in date_rec.reason.lower() or "date" in date_rec.reason.lower()
+
+    def test_partitioning_recommendations_for_aggregations(self, coding_agent):
+        """Test that partitioning recommendations are generated for group-by operations."""
+        requirements = ParsedRequirements(
+            story_id="test-123",
+            title="Test aggregation",
+            description="Test",
+            input_sources=[
+                DataSource(
+                    name="sales",
+                    location="data/sales",
+                    format="parquet",
+                    schema=[
+                        ColumnDefinition(name="product_id", data_type="string", nullable=False),
+                        ColumnDefinition(name="amount", data_type="double", nullable=False),
+                    ],
+                )
+            ],
+            output_schema=[],
+            output_location="data/output",
+            transformation_steps=[
+                TransformationStep(
+                    step_id="step1",
+                    transformation_type="aggregate",
+                    description="Group by product",
+                    inputs=["sales"],
+                    outputs=["aggregated"],
+                    parameters={"group_by_columns": ["product_id", "category"]},
+                )
+            ],
+            quality_rules=[],
+        )
+        
+        recommendations = coding_agent._recommend_partitioning(requirements)
+        
+        assert len(recommendations) > 0
+        agg_rec = [r for r in recommendations if r.partition_type == "hash"]
+        assert len(agg_rec) > 0
+        assert "product_id" in agg_rec[0].columns or "category" in agg_rec[0].columns
+
+    def test_caching_recommendations_for_joins(self, coding_agent, sample_parsed_requirements):
+        """Test that caching recommendations are generated for multiple joins."""
+        generated_code = GeneratedCode(
+            main_pipeline_code="""
+df1 = spark.read.parquet('data')
+df2 = spark.read.parquet('lookup')
+joined1 = df1.join(df2, on='id')
+joined2 = joined1.join(df2, on='key')
+joined3 = joined2.join(df2, on='category')
+            """,
+            input_schema_model=PydanticModel(
+                model_name="Input", module_name="models", description="", code=""
+            ),
+            output_schema_model=PydanticModel(
+                model_name="Output", module_name="models", description="", code=""
+            ),
+        )
+        
+        recommendations = coding_agent._recommend_caching(sample_parsed_requirements, generated_code)
+        
+        assert len(recommendations) > 0
+        assert any("join" in rec.reason.lower() for rec in recommendations)
+
+    def test_caching_recommendations_for_dimension_tables(self, coding_agent):
+        """Test that dimension tables get caching recommendations."""
+        requirements = ParsedRequirements(
+            story_id="test-123",
+            title="Test dimension join",
+            description="Test",
+            input_sources=[
+                DataSource(
+                    name="dim_products",
+                    location="data/dim_products",
+                    format="parquet",
+                    schema=[
+                        ColumnDefinition(name="product_id", data_type="string", nullable=False),
+                    ],
+                )
+            ],
+            output_schema=[],
+            output_location="data/output",
+            transformation_steps=[],
+            quality_rules=[],
+        )
+        
+        generated_code = GeneratedCode(
+            main_pipeline_code="df = spark.read.parquet('data')",
+            input_schema_model=PydanticModel(
+                model_name="Input", module_name="models", description="", code=""
+            ),
+            output_schema_model=PydanticModel(
+                model_name="Output", module_name="models", description="", code=""
+            ),
+        )
+        
+        recommendations = coding_agent._recommend_caching(requirements, generated_code)
+        
+        dim_recs = [r for r in recommendations if "dim" in r.dataframe_name.lower()]
+        assert len(dim_recs) > 0
+        assert dim_recs[0].storage_level == "MEMORY_ONLY"
+
+    def test_join_optimization_broadcast_for_dimension_tables(self, coding_agent):
+        """Test that broadcast join is recommended for dimension tables."""
+        requirements = ParsedRequirements(
+            story_id="test-123",
+            title="Test join optimization",
+            description="Test",
+            input_sources=[],
+            output_schema=[],
+            output_location="data/output",
+            transformation_steps=[
+                TransformationStep(
+                    step_id="step1",
+                    transformation_type="join",
+                    description="Join with dimension",
+                    inputs=["orders", "dim_customers"],
+                    outputs=["joined"],
+                    parameters={"join_type": "inner"},
+                )
+            ],
+            quality_rules=[],
+        )
+        
+        optimizations = coding_agent._optimize_joins(requirements)
+        
+        assert len(optimizations) > 0
+        assert optimizations[0].optimization_type == "broadcast"
+        assert "dim" in optimizations[0].join_description.lower() or "dimension" in optimizations[0].reason.lower()
+
+    def test_join_optimization_sort_merge_for_large_tables(self, coding_agent):
+        """Test that sort-merge join is recommended for large tables."""
+        requirements = ParsedRequirements(
+            story_id="test-123",
+            title="Test join optimization",
+            description="Test",
+            input_sources=[],
+            output_schema=[],
+            output_location="data/output",
+            transformation_steps=[
+                TransformationStep(
+                    step_id="step1",
+                    transformation_type="join",
+                    description="Join large tables",
+                    inputs=["orders", "transactions"],
+                    outputs=["joined"],
+                    parameters={"join_type": "inner"},
+                )
+            ],
+            quality_rules=[],
+        )
+        
+        optimizations = coding_agent._optimize_joins(requirements)
+        
+        assert len(optimizations) > 0
+        assert optimizations[0].optimization_type == "sort_merge"
+
+    def test_optimization_rules_generation(self, coding_agent, sample_parsed_requirements):
+        """Test that general optimization rules are generated."""
+        generated_code = GeneratedCode(
+            main_pipeline_code="""
+df = spark.read.parquet('data')
+filtered = df.filter(col('amount') > 100)
+selected = filtered.select('id', 'amount')
+joined = selected.join(other, on='id')
+grouped = joined.groupBy('category').agg(sum('amount'))
+            """,
+            input_schema_model=PydanticModel(
+                model_name="Input", module_name="models", description="", code=""
+            ),
+            output_schema_model=PydanticModel(
+                model_name="Output", module_name="models", description="", code=""
+            ),
+        )
+        
+        rules = coding_agent._generate_optimization_rules(sample_parsed_requirements, generated_code)
+        
+        assert len(rules) > 0
+        
+        # Check for filter pushdown rule
+        filter_rules = [r for r in rules if r.category == "filter_pushdown"]
+        assert len(filter_rules) > 0
+        
+        # Check for broadcast rule
+        broadcast_rules = [r for r in rules if r.category == "broadcast"]
+        assert len(broadcast_rules) > 0
+        
+        # Check for shuffle rule
+        shuffle_rules = [r for r in rules if r.category == "shuffle"]
+        assert len(shuffle_rules) > 0
+
+    def test_cost_reduction_estimation(self, coding_agent):
+        """Test cost reduction estimation based on optimizations."""
+        # High optimization potential
+        partitioning_recs = [
+            PartitioningRecommendation(
+                columns=["date"],
+                reason="Test",
+                estimated_benefit="30%",
+                partition_type="range",
+            )
+        ]
+        caching_recs = [
+            CachingRecommendation(
+                dataframe_name="df",
+                reason="Test",
+                storage_level="MEMORY_AND_DISK",
+                estimated_reuse_count=3,
+            )
+        ]
+        join_opts = [
+            JoinOptimization(
+                join_description="Test join",
+                optimization_type="broadcast",
+                reason="Small table",
+            )
+        ]
+        
+        cost_reduction = coding_agent._estimate_cost_reduction(
+            partitioning_recs, caching_recs, join_opts
+        )
+        
+        assert "%" in cost_reduction
+        assert "reduction" in cost_reduction.lower()
+
+    def test_optimization_comments_added_to_code(self, coding_agent, sample_parsed_requirements):
+        """Test that optimization comments are added to generated code."""
+        generated_code = GeneratedCode(
+            main_pipeline_code="def process(): pass",
+            input_schema_model=PydanticModel(
+                model_name="Input", module_name="models", description="", code=""
+            ),
+            output_schema_model=PydanticModel(
+                model_name="Output", module_name="models", description="", code=""
+            ),
+        )
+        
+        optimization_analysis = OptimizationAnalysis(
+            overall_score=0.85,
+            partitioning_recommendations=[
+                PartitioningRecommendation(
+                    columns=["date"],
+                    reason="Temporal partitioning",
+                    estimated_benefit="30% faster",
+                    partition_type="range",
+                )
+            ],
+            caching_recommendations=[
+                CachingRecommendation(
+                    dataframe_name="df",
+                    reason="Multiple reuses",
+                    storage_level="MEMORY_AND_DISK",
+                    estimated_reuse_count=3,
+                )
+            ],
+            join_optimizations=[],
+            optimization_rules=[
+                OptimizationRule(
+                    rule_id="opt-001",
+                    category="filter_pushdown",
+                    priority="high",
+                    title="Apply filters early",
+                    description="Move filters early",
+                    estimated_impact="40% faster",
+                )
+            ],
+            estimated_cost_reduction="40-60% reduction",
+        )
+        
+        optimized_code = coding_agent._add_optimization_comments(generated_code, optimization_analysis)
+        
+        assert "PERFORMANCE OPTIMIZATION RECOMMENDATIONS" in optimized_code.main_pipeline_code
+        assert "Overall Optimization Score" in optimized_code.main_pipeline_code
+        assert "PARTITIONING" in optimized_code.main_pipeline_code
+        assert "CACHING" in optimized_code.main_pipeline_code
+        assert "HIGH PRIORITY OPTIMIZATIONS" in optimized_code.main_pipeline_code
+        assert "date" in optimized_code.main_pipeline_code  # Partitioning column
+
+    def test_full_optimization_analysis_flow(self, coding_agent, sample_parsed_requirements):
+        """Test complete optimization analysis workflow."""
+        generated_code = GeneratedCode(
+            main_pipeline_code="""
+df = spark.read.parquet('data')
+filtered = df.filter(col('order_date') > '2024-01-01')
+joined = filtered.join(dim_products, on='product_id')
+grouped = joined.groupBy('category').agg(sum('amount'))
+            """,
+            input_schema_model=PydanticModel(
+                model_name="Input", module_name="models", description="", code=""
+            ),
+            output_schema_model=PydanticModel(
+                model_name="Output", module_name="models", description="", code=""
+            ),
+        )
+        
+        optimization_analysis = coding_agent._analyze_optimizations(
+            sample_parsed_requirements, generated_code
+        )
+        
+        assert optimization_analysis is not None
+        assert isinstance(optimization_analysis, OptimizationAnalysis)
+        assert 0.0 <= optimization_analysis.overall_score <= 1.0
+        assert optimization_analysis.estimated_cost_reduction is not None
+        assert optimization_analysis.notes is not None

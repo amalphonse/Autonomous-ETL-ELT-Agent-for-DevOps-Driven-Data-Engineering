@@ -5,7 +5,7 @@ from parsed requirements extracted by the Task Agent.
 """
 
 from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from src.agents.task_agent.schemas import ParsedRequirements
 
 
@@ -93,6 +93,77 @@ class CodingAgentInput(BaseModel):
     )
 
 
+class PartitioningRecommendation(BaseModel):
+    """Recommendation for data partitioning strategy."""
+
+    columns: List[str] = Field(..., description="Columns to partition by")
+    reason: str = Field(..., description="Rationale for this partitioning strategy")
+    estimated_benefit: str = Field(..., description="Expected performance benefit")
+    partition_type: Literal["hash", "range", "list"] = Field(
+        default="hash", description="Type of partitioning to use"
+    )
+    num_partitions: Optional[int] = Field(None, description="Recommended number of partitions")
+
+
+class CachingRecommendation(BaseModel):
+    """Recommendation for DataFrame caching."""
+
+    dataframe_name: str = Field(..., description="Name/identifier of DataFrame to cache")
+    reason: str = Field(..., description="Why this DataFrame should be cached")
+    storage_level: Literal["MEMORY_ONLY", "MEMORY_AND_DISK", "DISK_ONLY", "MEMORY_ONLY_SER"] = Field(
+        default="MEMORY_AND_DISK", description="Storage level for caching"
+    )
+    estimated_reuse_count: int = Field(..., description="Estimated number of times this DataFrame will be reused")
+
+
+class JoinOptimization(BaseModel):
+    """Optimization recommendation for join operations."""
+
+    join_description: str = Field(..., description="Description of the join operation")
+    optimization_type: Literal["broadcast", "sort_merge", "shuffle_hash", "bucketed"] = Field(
+        ..., description="Recommended join strategy"
+    )
+    reason: str = Field(..., description="Rationale for this join optimization")
+    estimated_data_size: Optional[str] = Field(None, description="Estimated size of data being joined")
+    broadcast_threshold: Optional[str] = Field(None, description="Broadcast threshold if using broadcast join")
+
+
+class OptimizationRule(BaseModel):
+    """Single optimization recommendation."""
+
+    rule_id: str = Field(..., description="Unique identifier for this optimization rule")
+    category: Literal["partitioning", "caching", "join", "shuffle", "spill", "broadcast", "filter_pushdown"] = Field(
+        ..., description="Category of optimization"
+    )
+    priority: Literal["high", "medium", "low"] = Field(..., description="Priority/impact of this optimization")
+    title: str = Field(..., description="Short title for the optimization")
+    description: str = Field(..., description="Detailed description of the optimization")
+    code_location: Optional[str] = Field(None, description="Where in the code this applies")
+    estimated_impact: str = Field(..., description="Estimated performance impact (e.g., '30% faster', 'reduce memory by 2x')")
+
+
+class OptimizationAnalysis(BaseModel):
+    """Complete optimization analysis for generated code."""
+
+    overall_score: float = Field(..., description="Overall optimization score (0-1)", ge=0.0, le=1.0)
+    partitioning_recommendations: List[PartitioningRecommendation] = Field(
+        default_factory=list, description="Partitioning strategy recommendations"
+    )
+    caching_recommendations: List[CachingRecommendation] = Field(
+        default_factory=list, description="Caching strategy recommendations"
+    )
+    join_optimizations: List[JoinOptimization] = Field(
+        default_factory=list, description="Join optimization recommendations"
+    )
+    optimization_rules: List[OptimizationRule] = Field(
+        default_factory=list, description="General optimization rules and recommendations"
+    )
+    estimated_cost_reduction: Optional[str] = Field(
+        None, description="Estimated cost reduction from applying optimizations"
+    )
+    notes: Optional[str] = Field(None, description="Additional notes about optimizations")
+
+
 class CodingAgentOutput(BaseModel):
     """Output from the Coding Agent."""
 
@@ -101,6 +172,9 @@ class CodingAgentOutput(BaseModel):
     )
     code_quality_score: float = Field(
         ..., description="Quality score of generated code (0-1)"
+    )
+    optimization_analysis: Optional[OptimizationAnalysis] = Field(
+        None, description="Performance optimization analysis and recommendations"
     )
     generation_notes: Optional[str] = Field(
         None, description="Notes or warnings about code generation"
