@@ -25,10 +25,20 @@ The **Orchestration Agent** automatically generates production-ready Apache Airf
 - Max active runs control
 
 ### 🏗️ Multi-Environment Support
-- **Google Cloud Dataproc**: DataprocSubmitJobOperator
-- **Databricks**: DatabricksSubmitRunOperator
-- **AWS EMR**: EmrAddStepsOperator
-- **Azure Synapse**: AzureSynapseRunSparkBatchOperator
+
+Users can select their preferred Spark execution platform via the Streamlit UI, and the Orchestration Agent will generate platform-specific DAGs:
+
+- **Google Cloud Dataproc** (`dataproc`): Uses DataprocSubmitJobOperator with cluster configuration
+- **Databricks** (`databricks`): Uses DatabricksSubmitRunOperator with job clusters
+- **AWS EMR** (`emr`): Uses EmrAddStepsOperator with step configurations
+- **Azure Synapse** (`synapse`): Uses AzureSynapseRunSparkBatchOperator with Spark pool settings
+
+**Compute Engine Selection in UI:**
+The Streamlit dashboard includes a "Target Compute Platform" selector that allows users to choose their preferred execution environment. This selection is passed through the entire pipeline and influences:
+- DAG operator selection
+- Resource configuration recommendations
+- Cost optimization strategies
+- Platform-specific best practices
 
 ## Architecture
 

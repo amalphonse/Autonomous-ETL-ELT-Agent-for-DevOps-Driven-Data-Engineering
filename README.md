@@ -18,12 +18,12 @@ This system minimizes manual effort in the DE lifecycle by using **Agentic AI** 
 * **Pipeline Optimization:** Automatic performance analysis with partitioning, caching, and join optimization recommendations to reduce costs by 40-60%.
 * **Autonomous Validation:** Auto-generates `pytest` suites including null-checks and schema assertions.
 * **Code Execution:** Safely executes generated PySpark code with error recovery and metrics capture.
-* **Airflow DAG Generation:** Automatically creates production-ready Airflow DAGs with task dependencies, scheduling, and deployment notes for Dataproc, Databricks, EMR, or Synapse environments.
+* **Airflow DAG Generation:** Automatically creates production-ready Airflow DAGs with task dependencies, scheduling, and deployment notes. Users can select their preferred compute platform (Dataproc, Databricks, EMR, or Synapse) via the UI, and the system generates platform-specific operators and configurations.
 * **Data Lineage Tracking:** Extracts and visualizes data flows with OpenLineage protocol compliance for full data governance.
 * **Persistent Storage:** SQLite database tracks all executions with full audit trail and analytics.
 * **Git Automation:** Creates branches, commits code/tests/DAGs, and raises Pull Requests via GitHub API (PyGithub).
 * **REST API:** FastAPI endpoints for pipeline creation, querying, analytics, and lineage visualization.
-* **Streamlit Dashboard:** Interactive UI for story submission, execution history, and analytics.
+* **Streamlit Dashboard:** Interactive UI for story submission with compute engine selection, execution history, and analytics.
 
 ## 🏗 Architecture
 
@@ -271,8 +271,7 @@ docker-compose up --build
 The **Streamlit UI** provides a user-friendly interface to submit user stories and track pipeline execution:
 
 ### Features
-- **📝 Submit User Stories** - Natural language requirements with source/target systems
-- **🤖 View Agent Outputs** - See generated code, tests, and PR details
+- **📝 Submit User Stories** - Natural language requirements with source/target systems- **⚙️ Compute Engine Selection** - Choose your preferred Spark execution platform (Dataproc, Databricks, EMR, or Synapse)- **🤖 View Agent Outputs** - See generated code, tests, and PR details
 - **📊 Pipeline History** - Browse all past executions with filtering
 - **📈 Analytics** - Aggregate metrics, quality scores, success rates
 - **🔗 Data Lineage** - Track data flows and transformations
