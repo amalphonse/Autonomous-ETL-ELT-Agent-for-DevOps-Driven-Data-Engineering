@@ -99,6 +99,8 @@ class AgentOrchestrator:
             attachments["source_system"] = user_story_data["source_system"]
         if user_story_data.get("target_system"):
             attachments["target_system"] = user_story_data["target_system"]
+        if user_story_data.get("compute_engine"):
+            attachments["compute_engine"] = user_story_data["compute_engine"]
         if user_story_data.get("data_quality_rules"):
             attachments["data_quality_rules"] = user_story_data["data_quality_rules"]
         if user_story_data.get("performance_requirements"):
@@ -191,6 +193,13 @@ class AgentOrchestrator:
             if output.status == AgentStatus.SUCCESS:
                 state["parsed_requirements"] = output.data.get("requirements")
                 state["task_confidence"] = output.data.get("confidence_score", 0.0)
+                
+                # Preserve compute_engine from user story attachments
+                user_story = state.get("user_story", {})
+                attachments = user_story.get("attachments", {})
+                if attachments and attachments.get("compute_engine"):
+                    state["parsed_requirements"]["execution_environment"] = attachments["compute_engine"]
+                
                 state["execution_log"].append("✅ Task Agent: Requirements parsed successfully")
                 logger.info(f"Task Agent confidence: {state['task_confidence']:.2%}")
             else:

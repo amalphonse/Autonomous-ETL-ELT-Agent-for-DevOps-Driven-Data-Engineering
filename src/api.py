@@ -157,6 +157,10 @@ class UserStoryInput(BaseModel):
     target_system: Optional[str] = Field(
         None, description="Target system or destination"
     )
+    compute_engine: Optional[str] = Field(
+        default="dataproc",
+        description="Target compute engine: dataproc, databricks, emr, or synapse"
+    )
     data_quality_rules: Optional[list] = Field(
         None, description="List of data quality validation rules"
     )
@@ -468,6 +472,7 @@ async def create_pipeline(
             "description": story.description,
             "source_system": story.source_system,
             "target_system": story.target_system,
+            "compute_engine": story.compute_engine or "dataproc",
             "data_quality_rules": story.data_quality_rules or [],
             "performance_requirements": story.performance_requirements or {},
         }

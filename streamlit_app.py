@@ -219,6 +219,36 @@ with tab1:
 
     st.markdown("---")
     
+    st.subheader("⚙️ Compute Engine Selection")
+    compute_engine_options = {
+        "Google Cloud Dataproc": "dataproc",
+        "Databricks": "databricks",
+        "AWS EMR": "emr",
+        "Azure Synapse": "synapse"
+    }
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        selected_engine = st.selectbox(
+            "Target Compute Platform",
+            options=list(compute_engine_options.keys()),
+            index=0,
+            help="Choose where your Spark pipeline will execute. Affects generated Airflow DAGs and optimizations."
+        )
+        compute_engine = compute_engine_options[selected_engine]
+    
+    with col2:
+        st.info(f"""
+        **{selected_engine}**
+        
+        Generated Airflow DAGs will be optimized for this platform with:
+        - Platform-specific operators
+        - Cost optimization strategies
+        - Resource configuration best practices
+        """)
+
+    st.markdown("---")
+    
     col1, col2 = st.columns(2)
     
     with col1:
@@ -278,6 +308,7 @@ with tab1:
                 "description": description,
                 "source_system": source_system if source_system else None,
                 "target_system": target_system if target_system else None,
+                "compute_engine": compute_engine,
                 "data_quality_rules": selected_quality_rules,
                 "performance_requirements": {
                     "max_execution_time_minutes": max_execution_time,
