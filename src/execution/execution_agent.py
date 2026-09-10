@@ -175,7 +175,7 @@ class ExecutionAgent(Agent):
 
             return AgentOutput(
                 agent_type=self.agent_type,
-                status=AgentStatus.SUCCESS if execution_result["status"] == "success" else AgentStatus.FAILURE,
+                status=AgentStatus.SUCCESS if execution_result["status"] == "success" else AgentStatus.FAILED,
                 data={
                     **execution_output.model_dump(),
                     "quality_score": quality_score,
@@ -217,6 +217,6 @@ class ExecutionAgent(Agent):
         """
         return AgentOutput(
             agent_type=self.agent_type,
-            status=AgentStatus.FAILURE,
+            status=AgentStatus.FAILED,
             data={"error": error_message},
         )

@@ -513,15 +513,12 @@ class AgentOrchestrator:
         pr_quality = state.get("pr_quality_score", 0.0)
         execution_quality = state.get("execution_quality_score", 0.5)  # Default 0.5 if not executed
         
-        # Average quality across all agents (6 agents: task, coding, test, execution, orchestration, pr)
-        overall_score = (
-            state.get("task_confidence", 0.0)
-            + code_quality
-            + test_quality
-            + execution_quality
-            + orchestration_quality
-            + pr_quality
-        ) / 6
+        quality_scores = [code_quality, test_quality, pr_quality]
+        if "execution_quality_score" in state:
+            quality_scores.append(execution_quality)
+        if "orchestration_quality_score" in state:
+            quality_scores.append(orchestration_quality)
+        overall_score = sum(quality_scores) / len(quality_scores)
         
         return {
             "status": state["status"],

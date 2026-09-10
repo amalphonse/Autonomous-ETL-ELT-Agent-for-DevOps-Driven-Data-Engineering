@@ -45,7 +45,31 @@ def orchestrator(mock_settings):
         test_mock.return_value = mock_settings_obj
         pr_mock.return_value = mock_settings_obj
         
-        return AgentOrchestrator()
+        orchestrator = AgentOrchestrator()
+        orchestrator.execution_agent.execute = AsyncMock(
+            return_value=AgentOutput(
+                agent_type=AgentType.TASK,
+                status=AgentStatus.SUCCESS,
+                data={
+                    "execution_result": {},
+                    "execution_status": "success",
+                    "quality_score": 1.0,
+                },
+                error=None,
+            )
+        )
+        orchestrator.orchestration_agent.execute = AsyncMock(
+            return_value=AgentOutput(
+                agent_type=AgentType.ORCHESTRATION,
+                status=AgentStatus.SUCCESS,
+                data={
+                    "generated_orchestration": {},
+                    "quality_score": 0.9,
+                },
+                error=None,
+            )
+        )
+        return orchestrator
 
 
 class TestAgentOrchestrator:
@@ -139,7 +163,7 @@ class TestAgentOrchestrator:
         assert final_state["code_quality_score"] == 0.88
         assert final_state["test_quality_score"] == 0.85
         assert final_state["pr_quality_score"] == 0.89
-        assert len(final_state["execution_log"]) == 4
+        assert len(final_state["execution_log"]) == 6
 
     @pytest.mark.asyncio
     async def test_execute_task_agent_failure(self, orchestrator):
@@ -459,7 +483,7 @@ class TestAgentOrchestrator:
 
         # Verify complete flow
         assert final_state["status"] == "success"
-        assert final_state["user_story"]["title"] == "End-to-End Test"
+        assert final_state["user_story"]["story"].startswith("End-to-End Test")
         assert final_state["parsed_requirements"]["title"] == "E2E Test"
         assert final_state["generated_code"] is not None
         assert final_state["generated_tests"] is not None
@@ -472,8 +496,10 @@ class TestAgentOrchestrator:
         assert final_state["pr_quality_score"] == 0.91
 
         # Verify execution log
-        assert len(final_state["execution_log"]) == 4
+        assert len(final_state["execution_log"]) == 6
         assert "Task Agent" in final_state["execution_log"][0]
         assert "Coding Agent" in final_state["execution_log"][1]
         assert "Test Agent" in final_state["execution_log"][2]
-        assert "PR Agent" in final_state["execution_log"][3]
+        assert "Execution Agent" in final_state["execution_log"][3]
+        assert "Orchestration Agent" in final_state["execution_log"][4]
+        assert "PR Agent" in final_state["execution_log"][5]
