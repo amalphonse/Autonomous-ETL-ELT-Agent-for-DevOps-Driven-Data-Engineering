@@ -71,11 +71,7 @@ class AgentOrchestrator:
         self.coding_agent = CodingAgent()
         self.test_agent = TestAgent()
         self.execution_agent = ExecutionAgent(use_local_executor=True)
-        self.orchestration_agent = OrchestrationAgent(
-        self.task_agent = TaskAgent()
-        self.coding_agent = CodingAgent()
-        self.test_agent = TestAgent()
-        self.execution_agent = ExecutionAgent(use_local_executor=True)
+        self.orchestration_agent = OrchestrationAgent()
         self.pr_agent = PRAgent()
 
     async def execute(self, user_story_data: dict) -> OrchestrationState:
@@ -147,13 +143,13 @@ class AgentOrchestrator:
             initial_state = await self._run_execution_agent(initial_state)
             if initial_state.get("error"):
                 initial_state["status"] = "failed"
-                returnOrchestration Agent (generate Airflow DAG)
+                return initial_state
+
+            # Execute Orchestration Agent (generate Airflow DAG)
             initial_state = await self._run_orchestration_agent(initial_state)
             if initial_state.get("error"):
                 initial_state["status"] = "failed"
                 return initial_state
-
-            # Execute  initial_state
 
             # Execute PR Agent
             initial_state = await self._run_pr_agent(initial_state)
@@ -353,7 +349,7 @@ class AgentOrchestrator:
 
         return state
 
-    def _run_orchestration_agent(
+    async def _run_orchestration_agent(
         self, state: OrchestrationState
     ) -> OrchestrationState:
         """Run Orchestration Agent - Generate Airflow DAG.
@@ -408,14 +404,6 @@ class AgentOrchestrator:
             logger.error(f"Orchestration Agent error: {str(e)}")
             state["error"] = str(e)
             state["status"] = "failed"
-
-        return state
-
-    async def _run_execution_status"] = "error"
-            state["execution_quality_score"] = 0.0
-            state["execution_log"].append(
-                "⚠️ Execution Agent: Execution error (continuing pipeline)"
-            )
 
         return state
 
